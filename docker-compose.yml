@@ -1,12 +1,15 @@
 services:
 
   cobalt-api:
-    image: ghcr.io/imputnet/cobalt:10
+    image: ghcr.io/imputnet/cobalt:11
     container_name: cobalt-api
     restart: unless-stopped
     environment:
-      - API_URL=http://192.168.111.111:9000
+      - API_URL=http://cobalt-api:9000
       - CORS_WILDCARD=1
+      - COOKIE_PATH=/cookies/cookies.json
+    volumes:
+      - cobalt-cookies:/cookies
 
   cobalt-ui:
     image: ghcr.io/sighmonis/cobalt-ui:latest
@@ -17,7 +20,15 @@ services:
     environment:
       - COBALT_URL=http://cobalt-api:9000
       - DOWNLOAD_DIR=/downloads
+      - COOKIE_PATH=/cookies/cookies.json
+      - TWITTER_AUTH_TOKEN=5e0db41b6c4c859374fa5befe3a1893466004bef
+      - TWITTER_CT0=dc210f9db6c9e762e7f244807a514dce18964d60e4d43f52f2fe2ecebfa6ea6572a67aadb9085f51ce79f693685a7dfb8d0bccb9c959eb426964a1560c0112f13a5179047408d5272a368e136984961a
+      - TWITTER_COOKIE_EXPIRY=17/07/2027
     volumes:
-      - /mnt/data/media/downloads:/downloads
+      - /mnt/data/media/downloads/cobalt:/downloads
+      - cobalt-cookies:/cookies
     depends_on:
       - cobalt-api
+
+volumes:
+  cobalt-cookies:
