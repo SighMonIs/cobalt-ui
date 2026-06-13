@@ -58,7 +58,8 @@ app.post('/api/download', async (req, res) => {
       return res.json({ status: 'picker', picker: cobaltRes.picker, audio: cobaltRes.audio });
     }
     if (cobaltRes.status === 'redirect' || cobaltRes.status === 'tunnel') {
-      const filename = cobaltRes.filename || `download_${Date.now()}.mp4`;
+      const ext = path.extname(cobaltRes.filename || '').replace('.', '') || 'mp4';
+      const filename = twitterFilename(url, ext) || cobaltRes.filename || `download_${Date.now()}.mp4`;
       const filepath = path.join(DOWNLOAD_DIR, sanitize(filename));
       streamToFile(cobaltRes.url, filepath, res);
     } else {
@@ -120,8 +121,36 @@ function cobaltFetch(method, endpoint, body) {
   });
 }
 
+// Extract date from Twitter snowflake ID
+function tweetIdToDate(id) {
+  try {
+    const twitterEpoch = 1288834974657n;
+    const ms = (BigInt(id) >> 22n) + twitterEpoch;
+    return new Date(Number(ms));
+  } catch {
+    return null;
+  }
+}
+
+function twitterFilename(url, ext) {
+  try {
+    const match = url.match(/(?:twitter\.com|x\.com)\/([^/]+)\/status\/(\d+)/);
+    if (!match) return null;
+    const username = match[1];
+    const tweetId = match[2];
+    const date = tweetIdToDate(tweetId);
+    if (!date) return null;
+    const day = String(date.getDate()).padStart(2, '0');
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const year = date.getFullYear();
+    return `X.com - ${username}, ${day} ${month} ${year}.${ext}`;
+  } catch {
+    return null;
+  }
+}
+
 function sanitize(name) {
   return name.replace(/[^a-zA-Z0-9._\-() ]/g, '_').slice(0, 200);
 }
 
-app.listen(3000, '0.0.0.0', () => console.log('Backend running on :3000'));
+app.listen(3000, () => console.log('Backend running on :3000'));
