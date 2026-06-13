@@ -124,4 +124,4 @@ function sanitize(name) {
   return name.replace(/[^a-zA-Z0-9._\-() ]/g, '_').slice(0, 200);
 }
 
-app.listen(3000, () => console.log('Backend running on :3000'));
+app.listen(3000, '0.0.0.0', () => console.log('Backend running on :3000'));
