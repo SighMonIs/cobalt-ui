@@ -110,6 +110,7 @@
 <footer>
   <span>cobalt-ui <b>v0.0.1</b></span>
   <span>cobalt api <b id="cobalt-version">—</b></span>
+  <span id="cookie-expiry" style="display:none">X.com cookies expire <b id="cookie-expiry-date">—</b></span>
 </footer>
   <div class="picker-inner">
     <h3>Multiple items found — pick one</h3>
@@ -126,8 +127,20 @@ async function checkStatus() {
     const dot = document.getElementById('status-dot');
     dot.className = d.ok ? 'ok' : 'err';
     dot.title = d.ok ? 'Cobalt API connected' : 'Cobalt API unavailable';
-    if (d.ok && d.cobalt?.cobalt?.version) {
+    if (d.cobalt?.cobalt?.version) {
       document.getElementById('cobalt-version').textContent = 'v' + d.cobalt.cobalt.version;
+    }
+    if (d.cookieExpiry) {
+      const [dd, mm, yyyy] = d.cookieExpiry.split('/');
+      const expiry = new Date(`${yyyy}-${mm}-${dd}`);
+      const daysLeft = Math.ceil((expiry - Date.now()) / (1000 * 60 * 60 * 24));
+      const el = document.getElementById('cookie-expiry');
+      const dateEl = document.getElementById('cookie-expiry-date');
+      dateEl.textContent = `${dd}/${mm}/${yyyy} (${daysLeft} days)`;
+      el.style.display = 'inline';
+      if (daysLeft <= 7) { dateEl.style.color = 'var(--error)'; }
+      else if (daysLeft <= 30) { dateEl.style.color = 'var(--warning)'; }
+      else { dateEl.style.color = 'var(--success)'; }
     }
   } catch { document.getElementById('status-dot').className = 'err'; }
 }
