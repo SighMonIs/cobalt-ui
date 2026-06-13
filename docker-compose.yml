@@ -9,7 +9,7 @@ services:
       - CORS_WILDCARD=1
 
   cobalt-ui:
-    image: ghcr.io/sighmonIs/cobalt-ui:latest
+    image: ghcr.io/sighmonis/cobalt-ui:latest
     container_name: cobalt-ui
     restart: unless-stopped
     ports:
