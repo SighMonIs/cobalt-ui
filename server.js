@@ -9,6 +9,23 @@ app.use(express.json());
 
 const COBALT_URL = process.env.COBALT_URL || 'http://cobalt-api:9000';
 const DOWNLOAD_DIR = process.env.DOWNLOAD_DIR || '/downloads';
+const COOKIE_PATH = process.env.COOKIE_PATH || '/app/cookies.json';
+const TWITTER_AUTH_TOKEN = process.env.TWITTER_AUTH_TOKEN || '';
+const TWITTER_CT0 = process.env.TWITTER_CT0 || '';
+const TWITTER_COOKIE_EXPIRY = process.env.TWITTER_COOKIE_EXPIRY || '';
+
+// Write cookies.json on startup from env vars
+if (TWITTER_AUTH_TOKEN && TWITTER_CT0) {
+  try {
+    const cookies = {
+      twitter: [`auth_token=${TWITTER_AUTH_TOKEN}; ct0=${TWITTER_CT0}`]
+    };
+    fs.writeFileSync(COOKIE_PATH, JSON.stringify(cookies, null, 2));
+    console.log(`Cookies written to ${COOKIE_PATH}`);
+  } catch (e) {
+    console.error('Failed to write cookies file:', e.message);
+  }
+}
 
 app.use((req, res, next) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -21,9 +38,9 @@ app.use((req, res, next) => {
 app.get('/api/status', async (req, res) => {
   try {
     const data = await cobaltFetch('GET', '/');
-    res.json({ ok: true, cobalt: data });
+    res.json({ ok: true, cobalt: data, cookieExpiry: TWITTER_COOKIE_EXPIRY || null });
   } catch (e) {
-    res.status(503).json({ ok: false, error: e.message });
+    res.status(503).json({ ok: false, error: e.message, cookieExpiry: TWITTER_COOKIE_EXPIRY || null });
   }
 });
 
