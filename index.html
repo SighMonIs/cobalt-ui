@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Cobalt Downloader</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --bg: #0f0f13; --surface: #1a1a22; --surface2: #22222e; --border: #2e2e3e;
+    --accent: #7c6af7; --accent-dim: #5a4fd4; --text: #e8e8f0; --text-muted: #888899;
+    --success: #4caf82; --error: #e05a6a; --warning: #e0a94a;
+  }
+  body { background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; min-height: 100vh; display: flex; flex-direction: column; }
+  header { padding: 1.25rem 2rem; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 12px; }
+  header h1 { font-size: 1.1rem; font-weight: 600; }
+  header span { font-size: 0.75rem; color: var(--text-muted); background: var(--surface2); padding: 2px 8px; border-radius: 20px; border: 1px solid var(--border); }
+  #status-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--text-muted); margin-left: auto; transition: background 0.3s; }
+  #status-dot.ok { background: var(--success); } #status-dot.err { background: var(--error); }
+  main { flex: 1; max-width: 860px; width: 100%; margin: 0 auto; padding: 2rem 1.5rem; }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 1.5rem; margin-bottom: 1.5rem; }
+  .url-row { display: flex; gap: 10px; margin-bottom: 1rem; }
+  input[type="text"] { flex: 1; background: var(--bg); border: 1px solid var(--border); color: var(--text); padding: 0.65rem 1rem; border-radius: 8px; font-size: 0.9rem; outline: none; transition: border-color 0.2s; }
+  input[type="text"]:focus { border-color: var(--accent); }
+  input[type="text"]::placeholder { color: var(--text-muted); }
+  .options-row { display: flex; gap: 10px; flex-wrap: wrap; }
+  select { background: var(--bg); border: 1px solid var(--border); color: var(--text); padding: 0.5rem 0.75rem; border-radius: 8px; font-size: 0.85rem; outline: none; cursor: pointer; }
+  button { background: var(--accent); color: #fff; border: none; padding: 0.65rem 1.4rem; border-radius: 8px; font-size: 0.9rem; font-weight: 500; cursor: pointer; transition: background 0.2s; white-space: nowrap; }
+  button:hover { background: var(--accent-dim); }
+  button.secondary { background: var(--surface2); border: 1px solid var(--border); color: var(--text); }
+  button.secondary:hover { background: var(--border); }
+  #queue { display: flex; flex-direction: column; gap: 8px; margin-bottom: 1.5rem; }
+  .queue-item { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 0.85rem 1rem; display: flex; align-items: center; gap: 12px; animation: fadeIn 0.2s ease; }
+  @keyframes fadeIn { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
+  .item-url { flex: 1; font-size: 0.82rem; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .item-status { font-size: 0.78rem; padding: 2px 10px; border-radius: 20px; white-space: nowrap; flex-shrink: 0; }
+  .item-status.pending { background: #2e2e3e; color: var(--text-muted); }
+  .item-status.running { background: #1e2a4a; color: #7aabf7; }
+  .item-status.done    { background: #1a3028; color: var(--success); }
+  .item-status.error   { background: #3a1a1e; color: var(--error); }
+  .item-status.picker  { background: #2e2518; color: var(--warning); }
+  .item-filename { font-size: 0.82rem; color: var(--text); max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex-shrink: 0; }
+  .section-title { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-muted); margin-bottom: 0.75rem; font-weight: 500; }
+  #files-list { display: flex; flex-direction: column; gap: 6px; }
+  .file-row { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 0.65rem 1rem; display: flex; align-items: center; gap: 10px; font-size: 0.85rem; }
+  .file-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .file-size, .file-date { color: var(--text-muted); font-size: 0.78rem; flex-shrink: 0; }
+  .empty-state { text-align: center; padding: 2rem; color: var(--text-muted); font-size: 0.9rem; }
+  .spinner { width: 14px; height: 14px; border: 2px solid rgba(255,255,255,0.3); border-top-color: #fff; border-radius: 50%; animation: spin 0.7s linear infinite; flex-shrink: 0; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .picker-modal { position: fixed; inset: 0; background: rgba(0,0,0,0.7); display: flex; align-items: center; justify-content: center; z-index: 100; padding: 1rem; }
+  .picker-modal.hidden { display: none; }
+  .picker-inner { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 1.5rem; max-width: 480px; width: 100%; }
+  .picker-inner h3 { margin-bottom: 1rem; font-size: 1rem; }
+  .picker-items { display: flex; flex-direction: column; gap: 8px; max-height: 300px; overflow-y: auto; margin-bottom: 1rem; }
+  .picker-item { display: flex; align-items: center; gap: 10px; background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; padding: 0.5rem 0.75rem; cursor: pointer; font-size: 0.85rem; transition: border-color 0.15s; }
+  .picker-item:hover { border-color: var(--accent); }
+  .picker-item img { width: 60px; height: 40px; object-fit: cover; border-radius: 4px; flex-shrink: 0; }
+</style>
+</head>
+<body>
+<header>
+  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+    <polyline points="7 10 12 15 17 10"/>
+    <line x1="12" y1="15" x2="12" y2="3"/>
+  </svg>
+  <h1>Cobalt Downloader</h1>
+  <span>powered by cobalt</span>
+  <div id="status-dot" title="Checking cobalt API..."></div>
+</header>
+<main>
+  <div class="card">
+    <div class="url-row">
+      <input type="text" id="url-input" placeholder="Paste a URL — YouTube, X, TikTok, Reddit, Instagram..." />
+      <button onclick="queueDownload()">Download</button>
+    </div>
+    <div class="options-row">
+      <select id="mode">
+        <option value="auto">Auto (video + audio)</option>
+        <option value="audio">Audio only</option>
+        <option value="mute">Video only (no audio)</option>
+      </select>
+      <select id="quality">
+        <option value="1080">1080p</option>
+        <option value="720">720p</option>
+        <option value="480">480p</option>
+        <option value="360">360p</option>
+        <option value="max">Max quality</option>
+      </select>
+      <select id="audio-fmt">
+        <option value="mp3">MP3</option>
+        <option value="ogg">OGG</option>
+        <option value="wav">WAV</option>
+        <option value="opus">Opus</option>
+        <option value="best">Best</option>
+      </select>
+    </div>
+  </div>
+  <div id="queue"></div>
+  <div id="files-section" style="display:none">
+    <div class="section-title">Downloaded files</div>
+    <div id="files-list"></div>
+  </div>
+  <div id="files-empty" class="empty-state" style="display:none">No downloads yet.</div>
+</main>
+<div id="picker-modal" class="picker-modal hidden">
+  <div class="picker-inner">
+    <h3>Multiple items found — pick one</h3>
+    <div id="picker-items" class="picker-items"></div>
+    <button class="secondary" onclick="closePicker()">Cancel</button>
+  </div>
+</div>
+<script>
+let pickerContext = null;
+
+async function checkStatus() {
+  try {
+    const d = await (await fetch('/api/status')).json();
+    const dot = document.getElementById('status-dot');
+    dot.className = d.ok ? 'ok' : 'err';
+    dot.title = d.ok ? 'Cobalt API connected' : 'Cobalt API unavailable';
+  } catch { document.getElementById('status-dot').className = 'err'; }
+}
+
+async function loadFiles() {
+  try {
+    const files = await (await fetch('/api/downloads')).json();
+    const section = document.getElementById('files-section');
+    const empty = document.getElementById('files-empty');
+    const list = document.getElementById('files-list');
+    if (!files.length) { section.style.display='none'; empty.style.display='block'; return; }
+    section.style.display='block'; empty.style.display='none';
+    list.innerHTML = files.map(f => `<div class="file-row"><span class="file-name" title="${f.name}">${f.name}</span><span class="file-size">${fmtSize(f.size)}</span><span class="file-date">${fmtDate(f.date)}</span></div>`).join('');
+  } catch {}
+}
+
+function fmtSize(b) { if(b<1024) return b+' B'; if(b<1048576) return (b/1024).toFixed(1)+' KB'; if(b<1073741824) return (b/1048576).toFixed(1)+' MB'; return (b/1073741824).toFixed(2)+' GB'; }
+function fmtDate(d) { return new Date(d).toLocaleString(undefined,{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}); }
+
+function addQueueItem(url, id) {
+  const el = document.createElement('div');
+  el.className = 'queue-item'; el.id = 'qi-' + id;
+  el.innerHTML = `<div class="spinner" id="spin-${id}"></div><div class="item-url" title="${url}">${url}</div><div class="item-filename" id="fn-${id}"></div><div class="item-status running" id="st-${id}">Contacting cobalt…</div>`;
+  document.getElementById('queue').prepend(el);
+}
+
+function updateItem(id, status, label, filename) {
+  const st=document.getElementById('st-'+id), spin=document.getElementById('spin-'+id), fn=document.getElementById('fn-'+id);
+  if(st){st.className='item-status '+status; st.textContent=label;}
+  if(spin) spin.style.display=status==='running'?'block':'none';
+  if(fn&&filename) fn.textContent=filename;
+}
+
+async function queueDownload() {
+  const url = document.getElementById('url-input').value.trim();
+  if (!url) return;
+  const mode=document.getElementById('mode').value, quality=document.getElementById('quality').value, audioFmt=document.getElementById('audio-fmt').value;
+  document.getElementById('url-input').value = '';
+  const id = Date.now();
+  addQueueItem(url, id);
+  try {
+    const data = await (await fetch('/api/download', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url, downloadMode: mode, videoQuality: quality, audioFormat: audioFmt }),
+    })).json();
+    if (data.error) { updateItem(id,'error',data.error); return; }
+    if (data.status === 'picker') { updateItem(id,'picker','Choose item'); document.getElementById('spin-'+id).style.display='none'; showPicker(data.picker, id); return; }
+    updateItem(id, 'done', '✓ Saved', data.filename);
+    loadFiles();
+  } catch(e) { updateItem(id,'error',e.message); }
+}
+
+function showPicker(items, queueId) {
+  pickerContext = { queueId }; window._pickerItems = items;
+  document.getElementById('picker-items').innerHTML = items.map((item,i) =>
+    `<div class="picker-item" onclick="pickItem(${i})">${item.thumb?`<img src="${item.thumb}" alt="">`:''}<span>${item.type||'Item'} ${i+1}</span></div>`
+  ).join('');
+  document.getElementById('picker-modal').classList.remove('hidden');
+}
+
+async function pickItem(index) {
+  closePicker();
+  const item = window._pickerItems[index], { queueId } = pickerContext;
+  updateItem(queueId, 'running', 'Downloading…');
+  try {
+    const filename = `pick_${Date.now()}_${index+1}.${item.type==='photo'?'jpg':'mp4'}`;
+    const data = await (await fetch('/api/download-url', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url: item.url, filename }),
+    })).json();
+    if (data.error) { updateItem(queueId,'error',data.error); return; }
+    updateItem(queueId, 'done', '✓ Saved', data.filename);
+    loadFiles();
+  } catch(e) { updateItem(queueId,'error',e.message); }
+}
+
+function closePicker() { document.getElementById('picker-modal').classList.add('hidden'); }
+
+document.getElementById('url-input').addEventListener('keydown', e => { if(e.key==='Enter') queueDownload(); });
+checkStatus(); loadFiles();
+setInterval(checkStatus, 30000); setInterval(loadFiles, 10000);
+</script>
+</body>
+</html>

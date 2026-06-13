@@ -1,0 +1,23 @@
+services:
+
+  cobalt-api:
+    image: ghcr.io/imputnet/cobalt:10
+    container_name: cobalt-api
+    restart: unless-stopped
+    environment:
+      - API_URL=http://192.168.111.111:9000
+      - CORS_WILDCARD=1
+
+  cobalt-ui:
+    image: ghcr.io/sighmonIs/cobalt-ui:latest
+    container_name: cobalt-ui
+    restart: unless-stopped
+    ports:
+      - "8082:80"
+    environment:
+      - COBALT_URL=http://cobalt-api:9000
+      - DOWNLOAD_DIR=/downloads
+    volumes:
+      - /mnt/data/media/downloads:/downloads
+    depends_on:
+      - cobalt-api
