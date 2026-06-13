@@ -28,4 +28,4 @@ jobs:
         with:
           context: .
           push: true
-          tags: ghcr.io/sighmonIs/cobalt-ui:latest
+          tags: ghcr.io/sighmonis/cobalt-ui:latest
