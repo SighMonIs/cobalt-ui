@@ -190,10 +190,43 @@ async function queueDownload() {
       body: JSON.stringify({ url, downloadMode: mode, videoQuality: quality, audioFormat: audioFmt }),
     })).json();
     if (data.error) { updateItem(id,'error',data.error); return; }
+    if (data.status === 'ytdlp') { trackYtdlpJob(data.jobId, id); return; }
     if (data.status === 'picker') { updateItem(id,'picker','Choose item'); document.getElementById('spin-'+id).style.display='none'; showPicker(data.picker, id); return; }
     updateItem(id, 'done', '✓ Saved', data.filename);
     loadFiles();
   } catch(e) { updateItem(id,'error',e.message); }
+}
+
+// Track a server-side yt-dlp download via Server-Sent Events progress stream
+function trackYtdlpJob(jobId, queueId) {
+  updateItem(queueId, 'running', 'Starting yt-dlp…');
+  const es = new EventSource('/api/progress/' + jobId);
+
+  es.onmessage = (e) => {
+    let job;
+    try { job = JSON.parse(e.data); } catch { return; }
+
+    if (job.status === 'starting') {
+      updateItem(queueId, 'running', 'Starting yt-dlp…');
+    } else if (job.status === 'downloading') {
+      const parts = [job.percent || '0%'];
+      if (job.speed && job.speed !== 'NA') parts.push(job.speed);
+      if (job.eta && job.eta !== 'NA' && job.eta !== 'Unknown') parts.push('ETA ' + job.eta);
+      updateItem(queueId, 'running', parts.join(' • '), job.filename);
+    } else if (job.status === 'done') {
+      updateItem(queueId, 'done', '✓ Saved', job.filename);
+      loadFiles();
+      es.close();
+    } else if (job.status === 'error') {
+      updateItem(queueId, 'error', job.error || 'yt-dlp failed');
+      es.close();
+    }
+  };
+
+  es.onerror = () => {
+    updateItem(queueId, 'error', 'Lost connection to progress stream');
+    es.close();
+  };
 }
 
 function showPicker(items, queueId) {
