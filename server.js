@@ -11,7 +11,8 @@ const app = express();
 app.use(express.json());
 
 const COBALT_URL = process.env.COBALT_URL || 'http://cobalt-api:9000';
-const DOWNLOAD_DIR = process.env.DOWNLOAD_DIR || '/downloads';
+const DOWNLOAD_DIR = process.env.DOWNLOAD_DIR || '/media/downloads/cobalt';
+const MEDIA_ROOT = process.env.MEDIA_ROOT || '/media';
 const COOKIE_PATH = process.env.COOKIE_PATH || '/app/cookies.json';
 const TWITTER_AUTH_TOKEN = process.env.TWITTER_AUTH_TOKEN || '';
 const TWITTER_CT0 = process.env.TWITTER_CT0 || '';
@@ -26,6 +27,37 @@ const YTDLP_DOMAINS = (process.env.YTDLP_DOMAINS || 'thisvid.com')
 
 const jobs = new Map(); // jobId -> { status, percent, eta, speed, filename, error, url }
 const jobEvents = new EventEmitter();
+
+// --- Per-domain folder settings ---------------------------------------------
+const SETTINGS_PATH = path.join(MEDIA_ROOT, '.cobalt-settings.json');
+
+function loadSettings() {
+  try { return JSON.parse(fs.readFileSync(SETTINGS_PATH, 'utf8')); }
+  catch { return { defaultDir: DOWNLOAD_DIR, rules: [] }; }
+}
+
+function saveSettings(settings) {
+  try { fs.writeFileSync(SETTINGS_PATH, JSON.stringify(settings, null, 2)); return true; }
+  catch (e) { console.error('Failed to save settings:', e.message); return false; }
+}
+
+function getDownloadDir(url) {
+  const settings = loadSettings();
+  let dir = settings.defaultDir || DOWNLOAD_DIR;
+  try {
+    const host = new URL(url).hostname.replace(/^www\./, '').toLowerCase();
+    for (const rule of (settings.rules || [])) {
+      const domain = (rule.domain || '').replace(/^www\./, '').toLowerCase();
+      if (domain && (host === domain || host.endsWith('.' + domain))) {
+        dir = rule.dir;
+        break;
+      }
+    }
+  } catch {}
+  try { fs.mkdirSync(dir, { recursive: true }); } catch {}
+  return dir;
+}
+// ---------------------------------------------------------------------------
 
 // --- Download history -------------------------------------------------------
 const HISTORY_PATH = path.join(DOWNLOAD_DIR, '.history.json');
@@ -66,9 +98,10 @@ function startYtdlpJob(url) {
     url,
   });
 
+  const downloadDir = getDownloadDir(url);
   const proc = spawn('yt-dlp', [
     url,
-    '-P', DOWNLOAD_DIR,
+    '-P', downloadDir,
     '-o', '%(title)s.%(ext)s',
     '--no-playlist',
     '--newline',
@@ -186,6 +219,15 @@ app.delete('/api/history/:id', (req, res) => {
   res.json({ ok: true });
 });
 
+app.get('/api/settings', (req, res) => res.json(loadSettings()));
+
+app.post('/api/settings', (req, res) => {
+  const { defaultDir, rules } = req.body;
+  if (!defaultDir) return res.status(400).json({ error: 'defaultDir is required' });
+  const ok = saveSettings({ defaultDir, rules: rules || [] });
+  res.json({ ok });
+});
+
 // --- yt-dlp progress stream (SSE) --------------------------------------------
 app.get('/api/progress/:jobId', (req, res) => {
   const { jobId } = req.params;
@@ -256,7 +298,7 @@ app.post('/api/download', async (req, res) => {
     if (cobaltRes.status === 'redirect' || cobaltRes.status === 'tunnel') {
       const ext = path.extname(cobaltRes.filename || '').replace('.', '') || 'mp4';
       const filename = twitterFilename(url, ext) || cobaltRes.filename || `download_${Date.now()}.mp4`;
-      const filepath = path.join(DOWNLOAD_DIR, sanitize(filename));
+      const filepath = path.join(getDownloadDir(url), sanitize(filename));
       const jobId = startCobaltJob(cobaltRes.url, filepath, url);
       return res.json({ status: 'cobalt-job', jobId });
     } else {
@@ -270,7 +312,7 @@ app.post('/api/download', async (req, res) => {
 app.post('/api/download-url', async (req, res) => {
   const { url, filename, originalUrl } = req.body;
   if (!url || !filename) return res.status(400).json({ error: 'url and filename required' });
-  const filepath = path.join(DOWNLOAD_DIR, sanitize(filename));
+  const filepath = path.join(getDownloadDir(originalUrl || url), sanitize(filename));
   const jobId = startCobaltJob(url, filepath, originalUrl || url);
   res.json({ status: 'cobalt-job', jobId });
 });

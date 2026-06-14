@@ -13,7 +13,7 @@
     --success: #4caf82; --error: #e05a6a; --warning: #e0a94a;
   }
   body { background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; min-height: 100vh; display: flex; flex-direction: column; }
-  header { padding: 1.25rem 2rem; border-bottom: 1px solid var(--border); display: flex; flex-direction: column; align-items: center; gap: 6px; }
+  header { padding: 1.25rem 2rem; border-bottom: 1px solid var(--border); display: flex; flex-direction: column; align-items: center; gap: 6px; position: relative; }
   header h1 { font-size: 1.1rem; font-weight: 600; }
   header span { font-size: 0.75rem; color: var(--text-muted); background: var(--surface2); padding: 2px 8px; border-radius: 20px; border: 1px solid var(--border); }
   main { flex: 1; max-width: 860px; width: 100%; margin: 0 auto; padding: 2rem 1.5rem; }
@@ -74,6 +74,15 @@
   footer { border-top: 1px solid var(--border); padding: 0.85rem 2rem; display: flex; align-items: center; justify-content: center; gap: 1.5rem; }
   footer span { font-size: 0.75rem; color: var(--text-muted); }
   footer span b { color: var(--text); font-weight: 500; }
+  .gear-btn { position: absolute; right: 1.25rem; top: 50%; transform: translateY(-50%); background: none; border: none; color: var(--text-muted); cursor: pointer; padding: 6px; border-radius: 6px; line-height: 0; }
+  .gear-btn:hover { color: var(--text); background: var(--surface2); }
+  .settings-section { margin-bottom: 1.25rem; }
+  .settings-label { display: block; font-size: 0.75rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 0.5rem; font-weight: 500; }
+  .rule-row { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+  .rule-row input { background: var(--bg); border: 1px solid var(--border); color: var(--text); padding: 0.4rem 0.75rem; border-radius: 6px; font-size: 0.85rem; outline: none; min-width: 0; }
+  .rule-row input:focus { border-color: var(--accent); }
+  .rule-domain { flex: 1; }
+  .rule-dir { flex: 2; }
 </style>
 </head>
 <body>
@@ -87,6 +96,11 @@
     <h1>Cobalt Downloader</h1>
   </div>
   <a href="https://cobalt.tools" target="_blank" style="font-size:0.75rem;color:var(--text-muted);background:var(--surface2);padding:2px 8px;border-radius:20px;border:1px solid var(--border);text-decoration:none;">powered by cobalt</a>
+  <button class="gear-btn" onclick="openSettings()" title="Settings">
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+    </svg>
+  </button>
 </header>
 <main>
   <div class="card">
@@ -131,6 +145,24 @@
   <span>cobalt api <b id="cobalt-version">—</b></span>
   <span id="cookie-expiry" style="display:none">X.com cookies expire <b id="cookie-expiry-date">—</b></span>
 </footer>
+<div id="settings-modal" class="picker-modal hidden">
+  <div class="picker-inner" style="max-width:580px">
+    <h3>Settings</h3>
+    <div class="settings-section">
+      <label class="settings-label">Default download folder</label>
+      <input type="text" id="set-default-dir" placeholder="/media/downloads/cobalt" style="width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:0.5rem 0.75rem;border-radius:6px;font-size:0.85rem;outline:none;">
+    </div>
+    <div class="settings-section">
+      <label class="settings-label">Folder rules — domain → folder</label>
+      <div id="set-rules"></div>
+      <button class="secondary" onclick="addRule()" style="margin-top:8px;font-size:0.8rem;padding:0.35rem 0.8rem">+ Add rule</button>
+    </div>
+    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:0.5rem">
+      <button class="secondary" onclick="closeSettings()">Cancel</button>
+      <button onclick="saveSettings()">Save</button>
+    </div>
+  </div>
+</div>
 <div id="picker-modal" class="picker-modal hidden">
   <div class="picker-inner">
     <h3>Multiple items found — pick one</h3>
@@ -351,8 +383,52 @@ async function pickItem(index) {
 
 function closePicker() { document.getElementById('picker-modal').classList.add('hidden'); }
 
+// --- Settings ---------------------------------------------------------------
+let settingsData = { defaultDir: '', rules: [] };
+
+async function loadSettingsData() {
+  try { settingsData = await (await fetch('/api/settings')).json(); } catch {}
+}
+
+function openSettings() {
+  document.getElementById('set-default-dir').value = settingsData.defaultDir || '';
+  renderRules(settingsData.rules || []);
+  document.getElementById('settings-modal').classList.remove('hidden');
+}
+
+function closeSettings() { document.getElementById('settings-modal').classList.add('hidden'); }
+
+function renderRules(rules) {
+  document.getElementById('set-rules').innerHTML = rules.map(r => ruleRowHtml(r.domain, r.dir)).join('');
+}
+
+function ruleRowHtml(domain, dir) {
+  return `<div class="rule-row">
+    <input type="text" class="rule-domain" value="${domain || ''}" placeholder="x.com">
+    <span style="color:var(--text-muted);flex-shrink:0">→</span>
+    <input type="text" class="rule-dir" value="${dir || ''}" placeholder="/media/downloads/twitter">
+    <button onclick="this.closest('.rule-row').remove()" class="hist-remove" title="Remove">×</button>
+  </div>`;
+}
+
+function addRule() {
+  document.getElementById('set-rules').insertAdjacentHTML('beforeend', ruleRowHtml('', ''));
+}
+
+async function saveSettings() {
+  const defaultDir = document.getElementById('set-default-dir').value.trim();
+  const rules = [...document.querySelectorAll('#set-rules .rule-row')].map(row => ({
+    domain: row.querySelector('.rule-domain').value.trim(),
+    dir: row.querySelector('.rule-dir').value.trim(),
+  })).filter(r => r.domain && r.dir);
+  settingsData = { defaultDir, rules };
+  await fetch('/api/settings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(settingsData) });
+  closeSettings();
+}
+// ---------------------------------------------------------------------------
+
 document.getElementById('url-input').addEventListener('keydown', e => { if(e.key==='Enter') queueDownload(); });
-checkStatus(); loadHistory();
+checkStatus(); loadHistory(); loadSettingsData();
 setInterval(checkStatus, 30000); setInterval(loadHistory, 10000);
 </script>
 </body>

@@ -19,13 +19,14 @@ services:
       - "8082:80"
     environment:
       - COBALT_URL=http://cobalt-api:9000
-      - DOWNLOAD_DIR=/downloads
+      - DOWNLOAD_DIR=/media/downloads/cobalt
+      - MEDIA_ROOT=/media
       - COOKIE_PATH=/cookies/cookies.json
       - TWITTER_AUTH_TOKEN=5e0db41b6c4c859374fa5befe3a1893466004bef
       - TWITTER_CT0=dc210f9db6c9e762e7f244807a514dce18964d60e4d43f52f2fe2ecebfa6ea6572a67aadb9085f51ce79f693685a7dfb8d0bccb9c959eb426964a1560c0112f13a5179047408d5272a368e136984961a
       - TWITTER_COOKIE_EXPIRY=17/07/2027
     volumes:
-      - /mnt/data/media/downloads/cobalt:/downloads
+      - /mnt/data/media:/media
       - cobalt-cookies:/cookies
     depends_on:
       - cobalt-api
