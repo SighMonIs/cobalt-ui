@@ -38,11 +38,12 @@
   @keyframes fadeIn { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
   .item-url { flex: 1; font-size: 0.82rem; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .item-status { font-size: 0.78rem; padding: 2px 10px; border-radius: 20px; white-space: nowrap; flex-shrink: 0; }
-  .item-status.pending { background: #2e2e3e; color: var(--text-muted); }
-  .item-status.running { background: #1e2a4a; color: #7aabf7; }
-  .item-status.done    { background: #1a3028; color: var(--success); }
-  .item-status.error   { background: #3a1a1e; color: var(--error); }
-  .item-status.picker  { background: #2e2518; color: var(--warning); }
+  .item-status.pending    { background: #2e2e3e; color: var(--text-muted); }
+  .item-status.running    { background: #1e2a4a; color: #7aabf7; }
+  .item-status.done       { background: #1a3028; color: var(--success); }
+  .item-status.error      { background: #3a1a1e; color: var(--error); }
+  .item-status.picker     { background: #2e2518; color: var(--warning); }
+  .item-status.cancelled  { background: #2a1f2e; color: var(--text-muted); }
   .item-filename { font-size: 0.82rem; color: var(--text); max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex-shrink: 0; }
   .section-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.75rem; }
   .section-title { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-muted); font-weight: 500; }
@@ -62,6 +63,8 @@
   .spinner { width: 14px; height: 14px; border: 2px solid rgba(255,255,255,0.3); border-top-color: #fff; border-radius: 50%; animation: spin 0.7s linear infinite; flex-shrink: 0; }
   .retry-btn { background: none; border: 1px solid var(--border); color: var(--text-muted); padding: 2px 10px; border-radius: 6px; font-size: 0.78rem; cursor: pointer; flex-shrink: 0; white-space: nowrap; }
   .retry-btn:hover { border-color: var(--accent); color: var(--accent); }
+  .cancel-btn { background: none; border: none; color: var(--text-muted); font-size: 0.85rem; cursor: pointer; padding: 0 2px; flex-shrink: 0; line-height: 1; }
+  .cancel-btn:hover { color: var(--error); }
   @keyframes spin { to { transform: rotate(360deg); } }
   .picker-modal { position: fixed; inset: 0; background: rgba(0,0,0,0.7); display: flex; align-items: center; justify-content: center; z-index: 100; padding: 1rem; }
   .picker-modal.hidden { display: none; }
@@ -74,8 +77,8 @@
   footer { border-top: 1px solid var(--border); padding: 0.85rem 2rem; display: flex; align-items: center; justify-content: center; gap: 1.5rem; }
   footer span { font-size: 0.75rem; color: var(--text-muted); }
   footer span b { color: var(--text); font-weight: 500; }
-  .gear-btn { position: absolute; right: 1.25rem; top: 50%; transform: translateY(-50%); background: none; border: none; color: var(--text-muted); cursor: pointer; padding: 6px; border-radius: 6px; line-height: 0; }
-  .gear-btn:hover { color: var(--text); background: var(--surface2); }
+  .settings-btn { background: none; border: 1px solid var(--border); color: var(--text-muted); cursor: pointer; padding: 5px 12px; border-radius: 6px; line-height: 1; font-size: 0.8rem; display: flex; align-items: center; gap: 6px; }
+  .settings-btn:hover { color: var(--text); background: var(--surface2); }
   .settings-section { margin-bottom: 1.25rem; }
   .settings-label { display: block; font-size: 0.75rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 0.5rem; font-weight: 500; }
   .rule-row { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
@@ -95,12 +98,6 @@
     </svg>
     <h1>Cobalt Downloader</h1>
   </div>
-  <a href="https://cobalt.tools" target="_blank" style="font-size:0.75rem;color:var(--text-muted);background:var(--surface2);padding:2px 8px;border-radius:20px;border:1px solid var(--border);text-decoration:none;">powered by cobalt</a>
-  <button class="gear-btn" onclick="openSettings()" title="Settings">
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-      <circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
-    </svg>
-  </button>
 </header>
 <main>
   <div class="card">
@@ -129,6 +126,14 @@
         <option value="best">Best</option>
       </select>
     </div>
+    <div style="display:flex;justify-content:flex-end;margin-top:0.75rem">
+      <button class="settings-btn" onclick="openSettings()">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+        </svg>
+        Settings
+      </button>
+    </div>
   </div>
   <div id="queue"></div>
   <div id="history-section" style="display:none">
@@ -144,6 +149,7 @@
   <span>cobalt-ui <b>v0.0.1</b></span>
   <span>cobalt api <b id="cobalt-version">—</b></span>
   <span id="cookie-expiry" style="display:none">X.com cookies expire <b id="cookie-expiry-date">—</b></span>
+  <a href="https://cobalt.tools" target="_blank" style="font-size:0.75rem;color:var(--text-muted);text-decoration:none;">powered by cobalt</a>
 </footer>
 <div id="settings-modal" class="picker-modal hidden">
   <div class="picker-inner" style="max-width:580px">
@@ -170,6 +176,17 @@
     <button class="secondary" onclick="closePicker()">Cancel</button>
   </div>
 </div>
+<div id="cancel-modal" class="picker-modal hidden">
+  <div class="picker-inner" style="max-width:400px">
+    <h3>Stop this download?</h3>
+    <p style="font-size:0.88rem;color:var(--text-muted);margin-bottom:1.25rem">What would you like to do with the partial file?</p>
+    <div style="display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap;">
+      <button class="secondary" onclick="closeCancelModal()">Keep going</button>
+      <button class="secondary" onclick="confirmCancel(false)">Stop, keep file</button>
+      <button style="background:var(--error);" onclick="confirmCancel(true)">Stop &amp; delete file</button>
+    </div>
+  </div>
+</div>
 <script>
 let pickerContext = null;
 
@@ -191,7 +208,7 @@ async function checkStatus() {
       else if (daysLeft <= 30) { dateEl.style.color = 'var(--warning)'; }
       else { dateEl.style.color = 'var(--success)'; }
     }
-  } catch { document.getElementById('status-dot').className = 'err'; }
+  } catch { /* cobalt api offline */ }
 }
 
 async function loadHistory() {
@@ -246,6 +263,7 @@ function addQueueItem(url, id) {
       <div class="item-url" title="${url}">${url}</div>
       <div class="item-filename" id="fn-${id}"></div>
       <div class="item-status running" id="st-${id}">Contacting…</div>
+      <button class="cancel-btn" id="cancel-${id}" style="display:none" onclick="requestCancel(${id})" title="Cancel download">✕</button>
       <button class="retry-btn" id="retry-${id}" style="display:none" onclick="retryDownload(${id})">↺ Retry</button>
     </div>
     <div class="progress-wrap" id="pw-${id}" style="display:none">
@@ -257,11 +275,13 @@ function addQueueItem(url, id) {
 function updateItem(id, status, label, filename, showRetry, percent) {
   const st=document.getElementById('st-'+id), spin=document.getElementById('spin-'+id),
         fn=document.getElementById('fn-'+id), rb=document.getElementById('retry-'+id),
+        cb=document.getElementById('cancel-'+id),
         pw=document.getElementById('pw-'+id), pb=document.getElementById('pb-'+id);
   if(st){st.className='item-status '+status; st.textContent=label;}
   if(spin) spin.style.display=status==='running'?'block':'none';
   if(fn&&filename) fn.textContent=filename;
   if(rb) rb.style.display=showRetry?'inline-block':'none';
+  if(cb) cb.style.display=status==='running'?'inline-block':'none';
   if(pw&&pb) {
     if(status==='running' && percent!==undefined) {
       pw.style.display='block';
@@ -317,7 +337,11 @@ async function queueDownload() {
 
 // Track a server-side job (yt-dlp or cobalt) via Server-Sent Events
 function trackJob(jobId, queueId, attempt = 0) {
-  if (attempt === 0) updateItem(queueId, 'running', 'Starting…', null, false, null);
+  if (attempt === 0) {
+    updateItem(queueId, 'running', 'Starting…', null, false, null);
+    const el = document.getElementById('qi-' + queueId);
+    if (el) el.dataset.jobId = jobId;
+  }
   const es = new EventSource('/api/progress/' + jobId);
 
   es.onmessage = (e) => {
@@ -340,6 +364,9 @@ function trackJob(jobId, queueId, attempt = 0) {
     } else if (job.status === 'error') {
       updateItem(queueId, 'error', job.error || 'Download failed', null, true);
       es.close();
+    } else if (job.status === 'cancelled') {
+      es.close();
+      // UI already updated by confirmCancel; this just closes the stream
     }
   };
 
@@ -382,6 +409,34 @@ async function pickItem(index) {
 }
 
 function closePicker() { document.getElementById('picker-modal').classList.add('hidden'); }
+
+// --- Cancel -----------------------------------------------------------------
+let cancelContext = null;
+
+function requestCancel(queueId) {
+  const el = document.getElementById('qi-' + queueId);
+  const jobId = el?.dataset.jobId;
+  if (!jobId) return;
+  cancelContext = { jobId, queueId };
+  document.getElementById('cancel-modal').classList.remove('hidden');
+}
+
+function closeCancelModal() {
+  document.getElementById('cancel-modal').classList.add('hidden');
+  cancelContext = null;
+}
+
+async function confirmCancel(deleteFile) {
+  if (!cancelContext) return;
+  const { jobId, queueId } = cancelContext;
+  closeCancelModal();
+  // Update UI immediately so the user sees feedback before the server round-trip
+  updateItem(queueId, 'cancelled', 'Cancelled', null, !deleteFile);
+  try {
+    await fetch('/api/job/' + jobId + '?deleteFile=' + deleteFile, { method: 'DELETE' });
+  } catch {}
+  if (!deleteFile) loadHistory();
+}
 
 // --- Settings ---------------------------------------------------------------
 let settingsData = { defaultDir: '', rules: [] };

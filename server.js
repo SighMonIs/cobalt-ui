@@ -88,7 +88,8 @@ function shouldUseYtdlp(url) {
 
 function startYtdlpJob(url) {
   const jobId = crypto.randomUUID();
-  jobs.set(jobId, {
+  const downloadDir = getDownloadDir(url);
+  const job = {
     status: 'starting',
     percent: '0%',
     eta: '',
@@ -96,9 +97,11 @@ function startYtdlpJob(url) {
     filename: null,
     error: null,
     url,
-  });
+    downloadDir,
+    proc: null,
+  };
+  jobs.set(jobId, job);
 
-  const downloadDir = getDownloadDir(url);
   const proc = spawn('yt-dlp', [
     url,
     '-P', downloadDir,
@@ -108,6 +111,8 @@ function startYtdlpJob(url) {
     '--progress-template', 'download:PROGRESS %(progress._percent_str)s|%(progress._eta_str)s|%(progress._speed_str)s',
     '--print', 'after_move:FILENAME %(filepath)s',
   ]);
+
+  job.proc = proc;
 
   let stdoutBuffer = '';
   let stderrTail = '';
@@ -150,7 +155,7 @@ function startYtdlpJob(url) {
       job.percent = '100%';
       let size = null;
       if (job.filename) {
-        try { size = fs.statSync(path.join(DOWNLOAD_DIR, job.filename)).size; } catch {}
+        try { size = fs.statSync(path.join(job.downloadDir || DOWNLOAD_DIR, job.filename)).size; } catch {}
       }
       appendHistory({ url: job.url, filename: job.filename, status: 'done', error: null, size });
     } else {
@@ -192,7 +197,7 @@ if (TWITTER_AUTH_TOKEN && TWITTER_CT0) {
 app.use((req, res, next) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
   if (req.method === 'OPTIONS') return res.sendStatus(204);
   next();
 });
@@ -216,6 +221,41 @@ app.delete('/api/history', (req, res) => {
 app.delete('/api/history/:id', (req, res) => {
   const history = loadHistory().filter(e => e.id !== req.params.id);
   try { fs.writeFileSync(HISTORY_PATH, JSON.stringify(history)); } catch {}
+  res.json({ ok: true });
+});
+
+app.delete('/api/job/:jobId', (req, res) => {
+  const { jobId } = req.params;
+  const deleteFile = req.query.deleteFile === 'true';
+  const job = jobs.get(jobId);
+  if (!job) return res.status(404).json({ error: 'Job not found' });
+
+  // Kill yt-dlp process
+  if (job.proc) { try { job.proc.kill(); } catch {} }
+
+  // Destroy cobalt streams
+  if (job._stream) { try { job._stream.destroy(); } catch {} }
+  if (job._file) { try { job._file.destroy(); } catch {} }
+  if (job._req) { try { job._req.destroy(); } catch {} }
+
+  if (deleteFile) {
+    // Cobalt: known filepath
+    if (job.filepath) { try { fs.unlinkSync(job.filepath); } catch {} }
+    // yt-dlp: delete any .part/.ytdl files in download dir (best effort)
+    if (job.downloadDir) {
+      try {
+        const files = fs.readdirSync(job.downloadDir);
+        for (const f of files.filter(f => f.endsWith('.part') || f.endsWith('.ytdl'))) {
+          try { fs.unlinkSync(path.join(job.downloadDir, f)); } catch {}
+        }
+      } catch {}
+    }
+  }
+
+  job.status = 'cancelled';
+  job.error = 'Download cancelled';
+  jobEvents.emit(jobId, { ...job });
+  setTimeout(() => jobs.delete(jobId), 5 * 60 * 1000);
   res.json({ ok: true });
 });
 
@@ -254,7 +294,7 @@ app.get('/api/progress/:jobId', (req, res) => {
 
   const listener = (data) => {
     send(data);
-    if (data.status === 'done' || data.status === 'error') {
+    if (data.status === 'done' || data.status === 'error' || data.status === 'cancelled') {
       clearInterval(heartbeat);
       jobEvents.off(jobId, listener);
       res.end();
@@ -320,7 +360,7 @@ app.post('/api/download-url', async (req, res) => {
 function startCobaltJob(cdnUrl, filepath, originalUrl) {
   const jobId = crypto.randomUUID();
   const filename = path.basename(filepath);
-  jobs.set(jobId, {
+  const job = {
     status: 'starting',
     percent: null,
     downloaded: 0,
@@ -328,74 +368,82 @@ function startCobaltJob(cdnUrl, filepath, originalUrl) {
     filename,
     error: null,
     url: originalUrl || cdnUrl,
-  });
+    filepath,
+    _req: null,
+    _stream: null,
+    _file: null,
+  };
+  jobs.set(jobId, job);
 
   let lastEmit = 0;
 
-  const req = (cdnUrl.startsWith('https') ? https : http).get(cdnUrl, (stream) => {
-    const job = jobs.get(jobId);
-    if (!job) return;
+  const cobaltReq = (cdnUrl.startsWith('https') ? https : http).get(cdnUrl, (stream) => {
+    const j = jobs.get(jobId);
+    if (!j) return;
+    j._stream = stream;
 
     if (stream.statusCode !== 200) {
       const errMsg = `Download failed: HTTP ${stream.statusCode}`;
-      job.status = 'error';
-      job.error = errMsg;
-      jobEvents.emit(jobId, { ...job });
-      appendHistory({ url: job.url, filename: null, status: 'error', error: errMsg, size: null });
+      j.status = 'error';
+      j.error = errMsg;
+      jobEvents.emit(jobId, { ...j });
+      appendHistory({ url: j.url, filename: null, status: 'error', error: errMsg, size: null });
       setTimeout(() => jobs.delete(jobId), 5 * 60 * 1000);
       return;
     }
 
     const contentLength = parseInt(stream.headers['content-length'], 10);
-    job.total = isNaN(contentLength) ? null : contentLength;
-    job.status = 'downloading';
-    jobEvents.emit(jobId, { ...job });
+    j.total = isNaN(contentLength) ? null : contentLength;
+    j.status = 'downloading';
+    jobEvents.emit(jobId, { ...j });
 
     const file = fs.createWriteStream(filepath);
+    j._file = file;
 
     stream.on('data', (chunk) => {
-      const j = jobs.get(jobId);
-      if (!j) return;
-      j.downloaded += chunk.length;
-      if (j.total) j.percent = (j.downloaded / j.total * 100).toFixed(1);
+      const jj = jobs.get(jobId);
+      if (!jj) return;
+      jj.downloaded += chunk.length;
+      if (jj.total) jj.percent = (jj.downloaded / jj.total * 100).toFixed(1);
       const now = Date.now();
-      if (now - lastEmit > 250) { lastEmit = now; jobEvents.emit(jobId, { ...j }); }
+      if (now - lastEmit > 250) { lastEmit = now; jobEvents.emit(jobId, { ...jj }); }
     });
 
     stream.pipe(file);
 
     file.on('finish', () => {
       file.close();
-      const j = jobs.get(jobId);
-      if (!j) return;
+      const jj = jobs.get(jobId);
+      if (!jj || jj.status === 'cancelled') return;
       let size = null;
       try { size = fs.statSync(filepath).size; } catch {}
-      j.status = 'done';
-      j.percent = '100';
-      jobEvents.emit(jobId, { ...j });
-      appendHistory({ url: j.url, filename, status: 'done', error: null, size });
+      jj.status = 'done';
+      jj.percent = '100';
+      jobEvents.emit(jobId, { ...jj });
+      appendHistory({ url: jj.url, filename, status: 'done', error: null, size });
       setTimeout(() => jobs.delete(jobId), 5 * 60 * 1000);
     });
 
     file.on('error', (e) => {
-      const j = jobs.get(jobId);
-      if (!j) return;
-      j.status = 'error';
-      j.error = e.message;
-      jobEvents.emit(jobId, { ...j });
-      appendHistory({ url: j.url, filename: null, status: 'error', error: e.message, size: null });
+      const jj = jobs.get(jobId);
+      if (!jj || jj.status === 'cancelled') return;
+      jj.status = 'error';
+      jj.error = e.message;
+      jobEvents.emit(jobId, { ...jj });
+      appendHistory({ url: jj.url, filename: null, status: 'error', error: e.message, size: null });
       fs.unlink(filepath, () => {});
       setTimeout(() => jobs.delete(jobId), 5 * 60 * 1000);
     });
   });
+  job._req = cobaltReq;
 
-  req.on('error', (e) => {
-    const job = jobs.get(jobId);
-    if (!job) return;
-    job.status = 'error';
-    job.error = e.message;
-    jobEvents.emit(jobId, { ...job });
-    appendHistory({ url: job.url, filename: null, status: 'error', error: e.message, size: null });
+  cobaltReq.on('error', (e) => {
+    const j = jobs.get(jobId);
+    if (!j || j.status === 'cancelled') return;
+    j.status = 'error';
+    j.error = e.message;
+    jobEvents.emit(jobId, { ...j });
+    appendHistory({ url: j.url, filename: null, status: 'error', error: e.message, size: null });
     fs.unlink(filepath, () => {});
     setTimeout(() => jobs.delete(jobId), 5 * 60 * 1000);
   });
