@@ -3,6 +3,9 @@ const https = require('https');
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
+const { spawn } = require('child_process');
+const crypto = require('crypto');
+const { EventEmitter } = require('events');
 
 const app = express();
 app.use(express.json());
@@ -13,6 +16,106 @@ const COOKIE_PATH = process.env.COOKIE_PATH || '/app/cookies.json';
 const TWITTER_AUTH_TOKEN = process.env.TWITTER_AUTH_TOKEN || '';
 const TWITTER_CT0 = process.env.TWITTER_CT0 || '';
 const TWITTER_COOKIE_EXPIRY = process.env.TWITTER_COOKIE_EXPIRY || '';
+
+// --- yt-dlp fallback config -------------------------------------------------
+// Domains that should always go straight to yt-dlp, skipping cobalt entirely.
+const YTDLP_DOMAINS = (process.env.YTDLP_DOMAINS || 'thisvid.com')
+  .split(',')
+  .map(d => d.trim().toLowerCase())
+  .filter(Boolean);
+
+const jobs = new Map(); // jobId -> { status, percent, eta, speed, filename, error }
+const jobEvents = new EventEmitter();
+
+function shouldUseYtdlp(url) {
+  try {
+    const host = new URL(url).hostname.replace(/^www\./, '').toLowerCase();
+    return YTDLP_DOMAINS.some(d => host === d || host.endsWith('.' + d));
+  } catch {
+    return false;
+  }
+}
+
+function startYtdlpJob(url) {
+  const jobId = crypto.randomUUID();
+  jobs.set(jobId, {
+    status: 'starting',
+    percent: '0%',
+    eta: '',
+    speed: '',
+    filename: null,
+    error: null,
+  });
+
+  const proc = spawn('yt-dlp', [
+    url,
+    '-P', DOWNLOAD_DIR,
+    '-o', '%(title)s.%(ext)s',
+    '--no-playlist',
+    '--newline',
+    '--progress-template', 'download:PROGRESS %(progress._percent_str)s|%(progress._eta_str)s|%(progress._speed_str)s',
+    '--print', 'after_move:FILENAME %(filepath)s',
+  ]);
+
+  let stdoutBuffer = '';
+  let stderrTail = '';
+
+  proc.stdout.on('data', (chunk) => {
+    stdoutBuffer += chunk.toString();
+    const lines = stdoutBuffer.split('\n');
+    stdoutBuffer = lines.pop(); // keep any incomplete trailing line for next chunk
+
+    for (const raw of lines) {
+      const line = raw.trim();
+      const job = jobs.get(jobId);
+      if (!job) continue;
+
+      if (line.startsWith('PROGRESS ')) {
+        const [pct, eta, speed] = line.slice('PROGRESS '.length).split('|');
+        job.status = 'downloading';
+        job.percent = (pct || '').trim();
+        job.eta = (eta || '').trim();
+        job.speed = (speed || '').trim();
+        jobEvents.emit(jobId, { ...job });
+      } else if (line.startsWith('FILENAME ')) {
+        job.filename = path.basename(line.slice('FILENAME '.length).trim());
+        jobEvents.emit(jobId, { ...job });
+      }
+    }
+  });
+
+  proc.stderr.on('data', (chunk) => {
+    stderrTail += chunk.toString();
+    // keep only the last ~2000 chars so it doesn't grow unbounded
+    if (stderrTail.length > 2000) stderrTail = stderrTail.slice(-2000);
+  });
+
+  proc.on('close', (code) => {
+    const job = jobs.get(jobId);
+    if (!job) return;
+    if (code === 0) {
+      job.status = 'done';
+      job.percent = '100%';
+    } else {
+      job.status = 'error';
+      job.error = stderrTail.trim().split('\n').filter(Boolean).pop() || `yt-dlp exited with code ${code}`;
+    }
+    jobEvents.emit(jobId, { ...job });
+    // Clean up finished job state after a while
+    setTimeout(() => jobs.delete(jobId), 5 * 60 * 1000);
+  });
+
+  proc.on('error', (e) => {
+    const job = jobs.get(jobId);
+    if (!job) return;
+    job.status = 'error';
+    job.error = e.message;
+    jobEvents.emit(jobId, { ...job });
+  });
+
+  return jobId;
+}
+// -----------------------------------------------------------------------------
 
 // Write cookies.json on startup from env vars
 if (TWITTER_AUTH_TOKEN && TWITTER_CT0) {
@@ -59,9 +162,48 @@ app.get('/api/downloads', (req, res) => {
   }
 });
 
+// --- yt-dlp progress stream (SSE) --------------------------------------------
+app.get('/api/progress/:jobId', (req, res) => {
+  const { jobId } = req.params;
+  const job = jobs.get(jobId);
+  if (!job) return res.status(404).end();
+
+  res.set({
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache',
+    'Connection': 'keep-alive',
+  });
+  res.flushHeaders?.();
+
+  const send = (data) => res.write(`data: ${JSON.stringify(data)}\n\n`);
+  send(job);
+
+  if (job.status === 'done' || job.status === 'error') {
+    return res.end();
+  }
+
+  const listener = (data) => {
+    send(data);
+    if (data.status === 'done' || data.status === 'error') {
+      jobEvents.off(jobId, listener);
+      res.end();
+    }
+  };
+  jobEvents.on(jobId, listener);
+
+  req.on('close', () => jobEvents.off(jobId, listener));
+});
+// -----------------------------------------------------------------------------
+
 app.post('/api/download', async (req, res) => {
   const { url, videoQuality = '1080', audioFormat = 'mp3', downloadMode = 'auto' } = req.body;
   if (!url) return res.status(400).json({ error: 'URL is required' });
+
+  // Domain allowlist: skip cobalt entirely for known yt-dlp-only sites
+  if (shouldUseYtdlp(url)) {
+    const jobId = startYtdlpJob(url);
+    return res.json({ status: 'ytdlp', jobId });
+  }
 
   try {
     const cobaltRes = await cobaltFetch('POST', '/', {
@@ -69,6 +211,11 @@ app.post('/api/download', async (req, res) => {
     });
 
     if (cobaltRes.status === 'error') {
+      // Generic fallback: cobalt doesn't recognise this site at all
+      if (cobaltRes.error?.code === 'error.api.link.invalid') {
+        const jobId = startYtdlpJob(url);
+        return res.json({ status: 'ytdlp', jobId });
+      }
       return res.status(400).json({ error: cobaltRes.error?.code || 'Cobalt error' });
     }
     if (cobaltRes.status === 'picker') {
