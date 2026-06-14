@@ -24,8 +24,26 @@ const YTDLP_DOMAINS = (process.env.YTDLP_DOMAINS || 'thisvid.com')
   .map(d => d.trim().toLowerCase())
   .filter(Boolean);
 
-const jobs = new Map(); // jobId -> { status, percent, eta, speed, filename, error }
+const jobs = new Map(); // jobId -> { status, percent, eta, speed, filename, error, url }
 const jobEvents = new EventEmitter();
+
+// --- Download history -------------------------------------------------------
+const HISTORY_PATH = path.join(DOWNLOAD_DIR, '.history.json');
+const HISTORY_MAX = 500;
+
+function loadHistory() {
+  try { return JSON.parse(fs.readFileSync(HISTORY_PATH, 'utf8')); } catch { return []; }
+}
+
+function appendHistory(entry) {
+  const history = loadHistory();
+  history.unshift({ id: crypto.randomUUID(), date: new Date().toISOString(), ...entry });
+  if (history.length > HISTORY_MAX) history.length = HISTORY_MAX;
+  try { fs.writeFileSync(HISTORY_PATH, JSON.stringify(history)); } catch (e) {
+    console.error('Failed to write history:', e.message);
+  }
+}
+// ---------------------------------------------------------------------------
 
 function shouldUseYtdlp(url) {
   try {
@@ -45,6 +63,7 @@ function startYtdlpJob(url) {
     speed: '',
     filename: null,
     error: null,
+    url,
   });
 
   const proc = spawn('yt-dlp', [
@@ -96,9 +115,15 @@ function startYtdlpJob(url) {
     if (code === 0) {
       job.status = 'done';
       job.percent = '100%';
+      let size = null;
+      if (job.filename) {
+        try { size = fs.statSync(path.join(DOWNLOAD_DIR, job.filename)).size; } catch {}
+      }
+      appendHistory({ url: job.url, filename: job.filename, status: 'done', error: null, size });
     } else {
       job.status = 'error';
       job.error = stderrTail.trim().split('\n').filter(Boolean).pop() || `yt-dlp exited with code ${code}`;
+      appendHistory({ url: job.url, filename: null, status: 'error', error: job.error, size: null });
     }
     jobEvents.emit(jobId, { ...job });
     // Clean up finished job state after a while
@@ -110,6 +135,7 @@ function startYtdlpJob(url) {
     if (!job) return;
     job.status = 'error';
     job.error = e.message;
+    appendHistory({ url: job.url, filename: null, status: 'error', error: e.message, size: null });
     jobEvents.emit(jobId, { ...job });
   });
 
@@ -147,19 +173,17 @@ app.get('/api/status', async (req, res) => {
   }
 });
 
-app.get('/api/downloads', (req, res) => {
-  try {
-    const files = fs.readdirSync(DOWNLOAD_DIR)
-      .filter(f => !f.startsWith('.'))
-      .map(f => {
-        const stat = fs.statSync(path.join(DOWNLOAD_DIR, f));
-        return { name: f, size: stat.size, date: stat.mtime };
-      })
-      .sort((a, b) => b.date - a.date);
-    res.json(files);
-  } catch (e) {
-    res.json([]);
-  }
+app.get('/api/history', (req, res) => res.json(loadHistory()));
+
+app.delete('/api/history', (req, res) => {
+  try { fs.writeFileSync(HISTORY_PATH, '[]'); } catch {}
+  res.json({ ok: true });
+});
+
+app.delete('/api/history/:id', (req, res) => {
+  const history = loadHistory().filter(e => e.id !== req.params.id);
+  try { fs.writeFileSync(HISTORY_PATH, JSON.stringify(history)); } catch {}
+  res.json({ ok: true });
 });
 
 // --- yt-dlp progress stream (SSE) --------------------------------------------
@@ -225,7 +249,7 @@ app.post('/api/download', async (req, res) => {
       const ext = path.extname(cobaltRes.filename || '').replace('.', '') || 'mp4';
       const filename = twitterFilename(url, ext) || cobaltRes.filename || `download_${Date.now()}.mp4`;
       const filepath = path.join(DOWNLOAD_DIR, sanitize(filename));
-      streamToFile(cobaltRes.url, filepath, res);
+      streamToFile(cobaltRes.url, filepath, res, url);
     } else {
       res.status(400).json({ error: `Unexpected cobalt status: ${cobaltRes.status}` });
     }
@@ -235,27 +259,31 @@ app.post('/api/download', async (req, res) => {
 });
 
 app.post('/api/download-url', async (req, res) => {
-  const { url, filename } = req.body;
+  const { url, filename, originalUrl } = req.body;
   if (!url || !filename) return res.status(400).json({ error: 'url and filename required' });
-  streamToFile(url, path.join(DOWNLOAD_DIR, sanitize(filename)), res);
+  streamToFile(url, path.join(DOWNLOAD_DIR, sanitize(filename)), res, originalUrl || url);
 });
 
-function streamToFile(url, filepath, res) {
+function streamToFile(url, filepath, res, originalUrl) {
   const proto = url.startsWith('https') ? https : http;
   const file = fs.createWriteStream(filepath);
   proto.get(url, (stream) => {
     if (stream.statusCode !== 200) {
       fs.unlink(filepath, () => {});
-      return res.status(400).json({ error: `Download failed: HTTP ${stream.statusCode}` });
+      const errMsg = `Download failed: HTTP ${stream.statusCode}`;
+      appendHistory({ url: originalUrl || url, filename: null, status: 'error', error: errMsg, size: null });
+      return res.status(400).json({ error: errMsg });
     }
     stream.pipe(file);
     file.on('finish', () => {
       file.close();
       const stat = fs.statSync(filepath);
+      appendHistory({ url: originalUrl || url, filename: path.basename(filepath), status: 'done', error: null, size: stat.size });
       res.json({ ok: true, filename: path.basename(filepath), size: stat.size });
     });
   }).on('error', (e) => {
     fs.unlink(filepath, () => {});
+    appendHistory({ url: originalUrl || url, filename: null, status: 'error', error: e.message, size: null });
     res.status(500).json({ error: e.message });
   });
 }

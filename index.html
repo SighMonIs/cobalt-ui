@@ -41,11 +41,20 @@
   .item-status.error   { background: #3a1a1e; color: var(--error); }
   .item-status.picker  { background: #2e2518; color: var(--warning); }
   .item-filename { font-size: 0.82rem; color: var(--text); max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex-shrink: 0; }
-  .section-title { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-muted); margin-bottom: 0.75rem; font-weight: 500; }
-  #files-list { display: flex; flex-direction: column; gap: 6px; }
-  .file-row { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 0.65rem 1rem; display: flex; align-items: center; gap: 10px; font-size: 0.85rem; }
-  .file-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .file-size, .file-date { color: var(--text-muted); font-size: 0.78rem; flex-shrink: 0; }
+  .section-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.75rem; }
+  .section-title { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-muted); font-weight: 500; }
+  button.ghost { background: none; border: 1px solid var(--border); color: var(--text-muted); padding: 0.25rem 0.75rem; font-size: 0.75rem; border-radius: 6px; }
+  button.ghost:hover { background: var(--surface2); color: var(--text); }
+  #history-list { display: flex; flex-direction: column; gap: 6px; }
+  .hist-row { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 0.6rem 1rem; display: flex; align-items: center; gap: 10px; font-size: 0.85rem; }
+  .hist-icon { font-size: 0.8rem; flex-shrink: 0; width: 16px; text-align: center; }
+  .hist-icon.done { color: var(--success); }
+  .hist-icon.error { color: var(--error); }
+  .hist-url { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-muted); font-size: 0.78rem; min-width: 0; }
+  .hist-filename { color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 220px; flex-shrink: 0; }
+  .hist-meta { color: var(--text-muted); font-size: 0.75rem; flex-shrink: 0; white-space: nowrap; }
+  .hist-remove { background: none; border: none; color: var(--text-muted); font-size: 1rem; line-height: 1; padding: 0 0 0 4px; cursor: pointer; flex-shrink: 0; }
+  .hist-remove:hover { color: var(--error); }
   .empty-state { text-align: center; padding: 2rem; color: var(--text-muted); font-size: 0.9rem; }
   .spinner { width: 14px; height: 14px; border: 2px solid rgba(255,255,255,0.3); border-top-color: #fff; border-radius: 50%; animation: spin 0.7s linear infinite; flex-shrink: 0; }
   @keyframes spin { to { transform: rotate(360deg); } }
@@ -102,11 +111,14 @@
     </div>
   </div>
   <div id="queue"></div>
-  <div id="files-section" style="display:none">
-    <div class="section-title">Downloaded files</div>
-    <div id="files-list"></div>
+  <div id="history-section" style="display:none">
+    <div class="section-header">
+      <div class="section-title">History</div>
+      <button class="ghost" onclick="clearHistory()">Clear all</button>
+    </div>
+    <div id="history-list"></div>
   </div>
-  <div id="files-empty" class="empty-state" style="display:none">No downloads yet.</div>
+  <div id="history-empty" class="empty-state" style="display:none">No download history yet.</div>
 </main>
 <footer>
   <span>cobalt-ui <b>v0.0.1</b></span>
@@ -147,16 +159,43 @@ async function checkStatus() {
   } catch { document.getElementById('status-dot').className = 'err'; }
 }
 
-async function loadFiles() {
+async function loadHistory() {
   try {
-    const files = await (await fetch('/api/downloads')).json();
-    const section = document.getElementById('files-section');
-    const empty = document.getElementById('files-empty');
-    const list = document.getElementById('files-list');
-    if (!files.length) { section.style.display='none'; empty.style.display='block'; return; }
+    const entries = await (await fetch('/api/history')).json();
+    const section = document.getElementById('history-section');
+    const empty = document.getElementById('history-empty');
+    const list = document.getElementById('history-list');
+    if (!entries.length) { section.style.display='none'; empty.style.display='block'; return; }
     section.style.display='block'; empty.style.display='none';
-    list.innerHTML = files.map(f => `<div class="file-row"><span class="file-name" title="${f.name}">${f.name}</span><span class="file-size">${fmtSize(f.size)}</span><span class="file-date">${fmtDate(f.date)}</span></div>`).join('');
+    list.innerHTML = entries.map(e => {
+      const isDone = e.status === 'done';
+      const meta = [e.size ? fmtSize(e.size) : null, fmtDate(e.date)].filter(Boolean).join(' · ');
+      return `<div class="hist-row" id="hr-${e.id}">
+        <span class="hist-icon ${e.status}">${isDone ? '✓' : '✗'}</span>
+        <span class="hist-url" title="${e.url}">${e.url}</span>
+        ${isDone && e.filename ? `<span class="hist-filename" title="${e.filename}">${e.filename}</span>` : (e.error ? `<span class="hist-filename" style="color:var(--error);font-size:0.75rem" title="${e.error}">${e.error}</span>` : '')}
+        <span class="hist-meta">${meta}</span>
+        <button class="hist-remove" onclick="removeHistory('${e.id}')" title="Remove">×</button>
+      </div>`;
+    }).join('');
   } catch {}
+}
+
+async function removeHistory(id) {
+  document.getElementById('hr-' + id)?.remove();
+  await fetch('/api/history/' + id, { method: 'DELETE' });
+  const list = document.getElementById('history-list');
+  if (!list.children.length) {
+    document.getElementById('history-section').style.display = 'none';
+    document.getElementById('history-empty').style.display = 'block';
+  }
+}
+
+async function clearHistory() {
+  await fetch('/api/history', { method: 'DELETE' });
+  document.getElementById('history-section').style.display = 'none';
+  document.getElementById('history-empty').style.display = 'block';
+  document.getElementById('history-list').innerHTML = '';
 }
 
 function fmtSize(b) { if(b<1024) return b+' B'; if(b<1048576) return (b/1024).toFixed(1)+' KB'; if(b<1073741824) return (b/1048576).toFixed(1)+' MB'; return (b/1073741824).toFixed(2)+' GB'; }
@@ -191,9 +230,9 @@ async function queueDownload() {
     })).json();
     if (data.error) { updateItem(id,'error',data.error); return; }
     if (data.status === 'ytdlp') { trackYtdlpJob(data.jobId, id); return; }
-    if (data.status === 'picker') { updateItem(id,'picker','Choose item'); document.getElementById('spin-'+id).style.display='none'; showPicker(data.picker, id); return; }
+    if (data.status === 'picker') { updateItem(id,'picker','Choose item'); document.getElementById('spin-'+id).style.display='none'; showPicker(data.picker, id, url); return; }
     updateItem(id, 'done', '✓ Saved', data.filename);
-    loadFiles();
+    loadHistory();
   } catch(e) { updateItem(id,'error',e.message); }
 }
 
@@ -215,7 +254,7 @@ function trackYtdlpJob(jobId, queueId) {
       updateItem(queueId, 'running', parts.join(' • '), job.filename);
     } else if (job.status === 'done') {
       updateItem(queueId, 'done', '✓ Saved', job.filename);
-      loadFiles();
+      loadHistory();
       es.close();
     } else if (job.status === 'error') {
       updateItem(queueId, 'error', job.error || 'yt-dlp failed');
@@ -229,8 +268,8 @@ function trackYtdlpJob(jobId, queueId) {
   };
 }
 
-function showPicker(items, queueId) {
-  pickerContext = { queueId }; window._pickerItems = items;
+function showPicker(items, queueId, originalUrl) {
+  pickerContext = { queueId, originalUrl }; window._pickerItems = items;
   document.getElementById('picker-items').innerHTML = items.map((item,i) =>
     `<div class="picker-item" onclick="pickItem(${i})">${item.thumb?`<img src="${item.thumb}" alt="">`:''}<span>${item.type||'Item'} ${i+1}</span></div>`
   ).join('');
@@ -239,26 +278,26 @@ function showPicker(items, queueId) {
 
 async function pickItem(index) {
   closePicker();
-  const item = window._pickerItems[index], { queueId } = pickerContext;
+  const item = window._pickerItems[index], { queueId, originalUrl } = pickerContext;
   updateItem(queueId, 'running', 'Downloading…');
   try {
     const filename = `pick_${Date.now()}_${index+1}.${item.type==='photo'?'jpg':'mp4'}`;
     const data = await (await fetch('/api/download-url', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ url: item.url, filename }),
+      body: JSON.stringify({ url: item.url, filename, originalUrl }),
     })).json();
     if (data.error) { updateItem(queueId,'error',data.error); return; }
     updateItem(queueId, 'done', '✓ Saved', data.filename);
-    loadFiles();
+    loadHistory();
   } catch(e) { updateItem(queueId,'error',e.message); }
 }
 
 function closePicker() { document.getElementById('picker-modal').classList.add('hidden'); }
 
 document.getElementById('url-input').addEventListener('keydown', e => { if(e.key==='Enter') queueDownload(); });
-checkStatus(); loadFiles();
-setInterval(checkStatus, 30000); setInterval(loadFiles, 10000);
+checkStatus(); loadHistory();
+setInterval(checkStatus, 30000); setInterval(loadHistory, 10000);
 </script>
 </body>
 </html>
