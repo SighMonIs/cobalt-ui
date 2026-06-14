@@ -31,7 +31,12 @@
   button.secondary { background: var(--surface2); border: 1px solid var(--border); color: var(--text); }
   button.secondary:hover { background: var(--border); }
   #queue { display: flex; flex-direction: column; gap: 8px; margin-bottom: 1.5rem; }
-  .queue-item { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 0.85rem 1rem; display: flex; align-items: center; gap: 12px; animation: fadeIn 0.2s ease; }
+  .queue-item { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 0.75rem 1rem; display: flex; flex-direction: column; gap: 6px; animation: fadeIn 0.2s ease; }
+  .queue-row { display: flex; align-items: center; gap: 12px; }
+  .progress-wrap { height: 3px; background: var(--border); border-radius: 2px; overflow: hidden; position: relative; }
+  .progress-bar { height: 100%; background: var(--accent); border-radius: 2px; transition: width 0.3s ease; position: absolute; left: 0; top: 0; }
+  .progress-bar.indeterminate { width: 35%; animation: progress-slide 1.2s linear infinite; }
+  @keyframes progress-slide { 0% { left: -35%; } 100% { left: 100%; } }
   @keyframes fadeIn { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
   .item-url { flex: 1; font-size: 0.82rem; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .item-status { font-size: 0.78rem; padding: 2px 10px; border-radius: 20px; white-space: nowrap; flex-shrink: 0; }
@@ -207,16 +212,38 @@ function addQueueItem(url, id) {
   const el = document.createElement('div');
   el.className = 'queue-item'; el.id = 'qi-' + id;
   el.dataset.url = url;
-  el.innerHTML = `<div class="spinner" id="spin-${id}"></div><div class="item-url" title="${url}">${url}</div><div class="item-filename" id="fn-${id}"></div><div class="item-status running" id="st-${id}">Contacting cobalt…</div><button class="retry-btn" id="retry-${id}" style="display:none" onclick="retryDownload(${id})">↺ Retry</button>`;
+  el.innerHTML = `
+    <div class="queue-row">
+      <div class="spinner" id="spin-${id}"></div>
+      <div class="item-url" title="${url}">${url}</div>
+      <div class="item-filename" id="fn-${id}"></div>
+      <div class="item-status running" id="st-${id}">Contacting…</div>
+      <button class="retry-btn" id="retry-${id}" style="display:none" onclick="retryDownload(${id})">↺ Retry</button>
+    </div>
+    <div class="progress-wrap" id="pw-${id}" style="display:none">
+      <div class="progress-bar" id="pb-${id}"></div>
+    </div>`;
   document.getElementById('queue').prepend(el);
 }
 
-function updateItem(id, status, label, filename, showRetry) {
-  const st=document.getElementById('st-'+id), spin=document.getElementById('spin-'+id), fn=document.getElementById('fn-'+id), rb=document.getElementById('retry-'+id);
+function updateItem(id, status, label, filename, showRetry, percent) {
+  const st=document.getElementById('st-'+id), spin=document.getElementById('spin-'+id),
+        fn=document.getElementById('fn-'+id), rb=document.getElementById('retry-'+id),
+        pw=document.getElementById('pw-'+id), pb=document.getElementById('pb-'+id);
   if(st){st.className='item-status '+status; st.textContent=label;}
   if(spin) spin.style.display=status==='running'?'block':'none';
   if(fn&&filename) fn.textContent=filename;
   if(rb) rb.style.display=showRetry?'inline-block':'none';
+  if(pw&&pb) {
+    if(status==='running' && percent!==undefined) {
+      pw.style.display='block';
+      const pct=parseFloat(percent);
+      if(isNaN(pct)) { pb.className='progress-bar indeterminate'; pb.style.width='35%'; }
+      else { pb.className='progress-bar'; pb.style.width=Math.min(100,pct)+'%'; }
+    } else {
+      pw.style.display='none';
+    }
+  }
 }
 
 async function retryDownload(id) {
@@ -232,7 +259,7 @@ async function retryDownload(id) {
       body: JSON.stringify({ url, downloadMode: mode, videoQuality: quality, audioFormat: audioFmt }),
     })).json();
     if (data.error) { updateItem(id,'error',data.error,null,true); return; }
-    if (data.status === 'ytdlp') { trackYtdlpJob(data.jobId, id); return; }
+    if (data.status === 'ytdlp' || data.status === 'cobalt-job') { trackJob(data.jobId, id); return; }
     if (data.status === 'picker') { updateItem(id,'picker','Choose item',null,false); document.getElementById('spin-'+id).style.display='none'; showPicker(data.picker, id, url); return; }
     updateItem(id, 'done', '✓ Saved', data.filename);
     loadHistory();
@@ -253,16 +280,16 @@ async function queueDownload() {
       body: JSON.stringify({ url, downloadMode: mode, videoQuality: quality, audioFormat: audioFmt }),
     })).json();
     if (data.error) { updateItem(id,'error',data.error,null,true); return; }
-    if (data.status === 'ytdlp') { trackYtdlpJob(data.jobId, id); return; }
+    if (data.status === 'ytdlp' || data.status === 'cobalt-job') { trackJob(data.jobId, id); return; }
     if (data.status === 'picker') { updateItem(id,'picker','Choose item'); document.getElementById('spin-'+id).style.display='none'; showPicker(data.picker, id, url); return; }
     updateItem(id, 'done', '✓ Saved', data.filename);
     loadHistory();
   } catch(e) { updateItem(id,'error',e.message,null,true); }
 }
 
-// Track a server-side yt-dlp download via Server-Sent Events progress stream
-function trackYtdlpJob(jobId, queueId, attempt = 0) {
-  if (attempt === 0) updateItem(queueId, 'running', 'Starting yt-dlp…');
+// Track a server-side job (yt-dlp or cobalt) via Server-Sent Events
+function trackJob(jobId, queueId, attempt = 0) {
+  if (attempt === 0) updateItem(queueId, 'running', 'Starting…', null, false, null);
   const es = new EventSource('/api/progress/' + jobId);
 
   es.onmessage = (e) => {
@@ -270,18 +297,20 @@ function trackYtdlpJob(jobId, queueId, attempt = 0) {
     try { job = JSON.parse(e.data); } catch { return; }
 
     if (job.status === 'starting') {
-      updateItem(queueId, 'running', 'Starting yt-dlp…');
+      updateItem(queueId, 'running', 'Starting…', null, false, null);
     } else if (job.status === 'downloading') {
-      const parts = [job.percent || '0%'];
+      const pct = parseFloat(job.percent);
+      const parts = [];
+      if (!isNaN(pct)) parts.push(pct.toFixed(1) + '%');
       if (job.speed && job.speed !== 'NA') parts.push(job.speed);
       if (job.eta && job.eta !== 'NA' && job.eta !== 'Unknown') parts.push('ETA ' + job.eta);
-      updateItem(queueId, 'running', parts.join(' • '), job.filename);
+      updateItem(queueId, 'running', parts.join(' • ') || 'Downloading…', job.filename, false, job.percent);
     } else if (job.status === 'done') {
       updateItem(queueId, 'done', '✓ Saved', job.filename);
       loadHistory();
       es.close();
     } else if (job.status === 'error') {
-      updateItem(queueId, 'error', job.error || 'yt-dlp failed', null, true);
+      updateItem(queueId, 'error', job.error || 'Download failed', null, true);
       es.close();
     }
   };
@@ -291,7 +320,7 @@ function trackYtdlpJob(jobId, queueId, attempt = 0) {
     const MAX = 3;
     if (attempt < MAX) {
       updateItem(queueId, 'running', `Reconnecting… (${attempt + 1}/${MAX})`);
-      setTimeout(() => trackYtdlpJob(jobId, queueId, attempt + 1), 2000);
+      setTimeout(() => trackJob(jobId, queueId, attempt + 1), 2000);
     } else {
       updateItem(queueId, 'error', 'Lost connection to progress stream', null, true);
     }
@@ -317,7 +346,8 @@ async function pickItem(index) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ url: item.url, filename, originalUrl }),
     })).json();
-    if (data.error) { updateItem(queueId,'error',data.error); return; }
+    if (data.error) { updateItem(queueId,'error',data.error,null,true); return; }
+    if (data.status === 'cobalt-job') { trackJob(data.jobId, queueId); return; }
     updateItem(queueId, 'done', '✓ Saved', data.filename);
     loadHistory();
   } catch(e) { updateItem(queueId,'error',e.message); }

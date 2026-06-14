@@ -257,7 +257,8 @@ app.post('/api/download', async (req, res) => {
       const ext = path.extname(cobaltRes.filename || '').replace('.', '') || 'mp4';
       const filename = twitterFilename(url, ext) || cobaltRes.filename || `download_${Date.now()}.mp4`;
       const filepath = path.join(DOWNLOAD_DIR, sanitize(filename));
-      streamToFile(cobaltRes.url, filepath, res, url);
+      const jobId = startCobaltJob(cobaltRes.url, filepath, url);
+      return res.json({ status: 'cobalt-job', jobId });
     } else {
       res.status(400).json({ error: `Unexpected cobalt status: ${cobaltRes.status}` });
     }
@@ -269,31 +270,95 @@ app.post('/api/download', async (req, res) => {
 app.post('/api/download-url', async (req, res) => {
   const { url, filename, originalUrl } = req.body;
   if (!url || !filename) return res.status(400).json({ error: 'url and filename required' });
-  streamToFile(url, path.join(DOWNLOAD_DIR, sanitize(filename)), res, originalUrl || url);
+  const filepath = path.join(DOWNLOAD_DIR, sanitize(filename));
+  const jobId = startCobaltJob(url, filepath, originalUrl || url);
+  res.json({ status: 'cobalt-job', jobId });
 });
 
-function streamToFile(url, filepath, res, originalUrl) {
-  const proto = url.startsWith('https') ? https : http;
-  const file = fs.createWriteStream(filepath);
-  proto.get(url, (stream) => {
+function startCobaltJob(cdnUrl, filepath, originalUrl) {
+  const jobId = crypto.randomUUID();
+  const filename = path.basename(filepath);
+  jobs.set(jobId, {
+    status: 'starting',
+    percent: null,
+    downloaded: 0,
+    total: null,
+    filename,
+    error: null,
+    url: originalUrl || cdnUrl,
+  });
+
+  let lastEmit = 0;
+
+  const req = (cdnUrl.startsWith('https') ? https : http).get(cdnUrl, (stream) => {
+    const job = jobs.get(jobId);
+    if (!job) return;
+
     if (stream.statusCode !== 200) {
-      fs.unlink(filepath, () => {});
       const errMsg = `Download failed: HTTP ${stream.statusCode}`;
-      appendHistory({ url: originalUrl || url, filename: null, status: 'error', error: errMsg, size: null });
-      return res.status(400).json({ error: errMsg });
+      job.status = 'error';
+      job.error = errMsg;
+      jobEvents.emit(jobId, { ...job });
+      appendHistory({ url: job.url, filename: null, status: 'error', error: errMsg, size: null });
+      setTimeout(() => jobs.delete(jobId), 5 * 60 * 1000);
+      return;
     }
+
+    const contentLength = parseInt(stream.headers['content-length'], 10);
+    job.total = isNaN(contentLength) ? null : contentLength;
+    job.status = 'downloading';
+    jobEvents.emit(jobId, { ...job });
+
+    const file = fs.createWriteStream(filepath);
+
+    stream.on('data', (chunk) => {
+      const j = jobs.get(jobId);
+      if (!j) return;
+      j.downloaded += chunk.length;
+      if (j.total) j.percent = (j.downloaded / j.total * 100).toFixed(1);
+      const now = Date.now();
+      if (now - lastEmit > 250) { lastEmit = now; jobEvents.emit(jobId, { ...j }); }
+    });
+
     stream.pipe(file);
+
     file.on('finish', () => {
       file.close();
-      const stat = fs.statSync(filepath);
-      appendHistory({ url: originalUrl || url, filename: path.basename(filepath), status: 'done', error: null, size: stat.size });
-      res.json({ ok: true, filename: path.basename(filepath), size: stat.size });
+      const j = jobs.get(jobId);
+      if (!j) return;
+      let size = null;
+      try { size = fs.statSync(filepath).size; } catch {}
+      j.status = 'done';
+      j.percent = '100';
+      jobEvents.emit(jobId, { ...j });
+      appendHistory({ url: j.url, filename, status: 'done', error: null, size });
+      setTimeout(() => jobs.delete(jobId), 5 * 60 * 1000);
     });
-  }).on('error', (e) => {
-    fs.unlink(filepath, () => {});
-    appendHistory({ url: originalUrl || url, filename: null, status: 'error', error: e.message, size: null });
-    res.status(500).json({ error: e.message });
+
+    file.on('error', (e) => {
+      const j = jobs.get(jobId);
+      if (!j) return;
+      j.status = 'error';
+      j.error = e.message;
+      jobEvents.emit(jobId, { ...j });
+      appendHistory({ url: j.url, filename: null, status: 'error', error: e.message, size: null });
+      fs.unlink(filepath, () => {});
+      setTimeout(() => jobs.delete(jobId), 5 * 60 * 1000);
+    });
   });
+
+  req.on('error', (e) => {
+    const job = jobs.get(jobId);
+    if (!job) return;
+    job.status = 'error';
+    job.error = e.message;
+    jobEvents.emit(jobId, { ...job });
+    appendHistory({ url: job.url, filename: null, status: 'error', error: e.message, size: null });
+    fs.unlink(filepath, () => {});
+    setTimeout(() => jobs.delete(jobId), 5 * 60 * 1000);
+  });
+
+  return jobId;
 }
 
 function cobaltFetch(method, endpoint, body) {
