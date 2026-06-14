@@ -57,6 +57,8 @@
   .hist-remove:hover { color: var(--error); }
   .empty-state { text-align: center; padding: 2rem; color: var(--text-muted); font-size: 0.9rem; }
   .spinner { width: 14px; height: 14px; border: 2px solid rgba(255,255,255,0.3); border-top-color: #fff; border-radius: 50%; animation: spin 0.7s linear infinite; flex-shrink: 0; }
+  .retry-btn { background: none; border: 1px solid var(--border); color: var(--text-muted); padding: 2px 10px; border-radius: 6px; font-size: 0.78rem; cursor: pointer; flex-shrink: 0; white-space: nowrap; }
+  .retry-btn:hover { border-color: var(--accent); color: var(--accent); }
   @keyframes spin { to { transform: rotate(360deg); } }
   .picker-modal { position: fixed; inset: 0; background: rgba(0,0,0,0.7); display: flex; align-items: center; justify-content: center; z-index: 100; padding: 1rem; }
   .picker-modal.hidden { display: none; }
@@ -204,15 +206,37 @@ function fmtDate(d) { return new Date(d).toLocaleString(undefined,{month:'short'
 function addQueueItem(url, id) {
   const el = document.createElement('div');
   el.className = 'queue-item'; el.id = 'qi-' + id;
-  el.innerHTML = `<div class="spinner" id="spin-${id}"></div><div class="item-url" title="${url}">${url}</div><div class="item-filename" id="fn-${id}"></div><div class="item-status running" id="st-${id}">Contacting cobalt…</div>`;
+  el.dataset.url = url;
+  el.innerHTML = `<div class="spinner" id="spin-${id}"></div><div class="item-url" title="${url}">${url}</div><div class="item-filename" id="fn-${id}"></div><div class="item-status running" id="st-${id}">Contacting cobalt…</div><button class="retry-btn" id="retry-${id}" style="display:none" onclick="retryDownload(${id})">↺ Retry</button>`;
   document.getElementById('queue').prepend(el);
 }
 
-function updateItem(id, status, label, filename) {
-  const st=document.getElementById('st-'+id), spin=document.getElementById('spin-'+id), fn=document.getElementById('fn-'+id);
+function updateItem(id, status, label, filename, showRetry) {
+  const st=document.getElementById('st-'+id), spin=document.getElementById('spin-'+id), fn=document.getElementById('fn-'+id), rb=document.getElementById('retry-'+id);
   if(st){st.className='item-status '+status; st.textContent=label;}
   if(spin) spin.style.display=status==='running'?'block':'none';
   if(fn&&filename) fn.textContent=filename;
+  if(rb) rb.style.display=showRetry?'inline-block':'none';
+}
+
+async function retryDownload(id) {
+  const el = document.getElementById('qi-' + id);
+  if (!el) return;
+  const url = el.dataset.url;
+  const mode=document.getElementById('mode').value, quality=document.getElementById('quality').value, audioFmt=document.getElementById('audio-fmt').value;
+  updateItem(id, 'running', 'Retrying…', null, false);
+  try {
+    const data = await (await fetch('/api/download', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url, downloadMode: mode, videoQuality: quality, audioFormat: audioFmt }),
+    })).json();
+    if (data.error) { updateItem(id,'error',data.error,null,true); return; }
+    if (data.status === 'ytdlp') { trackYtdlpJob(data.jobId, id); return; }
+    if (data.status === 'picker') { updateItem(id,'picker','Choose item',null,false); document.getElementById('spin-'+id).style.display='none'; showPicker(data.picker, id, url); return; }
+    updateItem(id, 'done', '✓ Saved', data.filename);
+    loadHistory();
+  } catch(e) { updateItem(id,'error',e.message,null,true); }
 }
 
 async function queueDownload() {
@@ -228,17 +252,17 @@ async function queueDownload() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ url, downloadMode: mode, videoQuality: quality, audioFormat: audioFmt }),
     })).json();
-    if (data.error) { updateItem(id,'error',data.error); return; }
+    if (data.error) { updateItem(id,'error',data.error,null,true); return; }
     if (data.status === 'ytdlp') { trackYtdlpJob(data.jobId, id); return; }
     if (data.status === 'picker') { updateItem(id,'picker','Choose item'); document.getElementById('spin-'+id).style.display='none'; showPicker(data.picker, id, url); return; }
     updateItem(id, 'done', '✓ Saved', data.filename);
     loadHistory();
-  } catch(e) { updateItem(id,'error',e.message); }
+  } catch(e) { updateItem(id,'error',e.message,null,true); }
 }
 
 // Track a server-side yt-dlp download via Server-Sent Events progress stream
-function trackYtdlpJob(jobId, queueId) {
-  updateItem(queueId, 'running', 'Starting yt-dlp…');
+function trackYtdlpJob(jobId, queueId, attempt = 0) {
+  if (attempt === 0) updateItem(queueId, 'running', 'Starting yt-dlp…');
   const es = new EventSource('/api/progress/' + jobId);
 
   es.onmessage = (e) => {
@@ -257,14 +281,20 @@ function trackYtdlpJob(jobId, queueId) {
       loadHistory();
       es.close();
     } else if (job.status === 'error') {
-      updateItem(queueId, 'error', job.error || 'yt-dlp failed');
+      updateItem(queueId, 'error', job.error || 'yt-dlp failed', null, true);
       es.close();
     }
   };
 
   es.onerror = () => {
-    updateItem(queueId, 'error', 'Lost connection to progress stream');
     es.close();
+    const MAX = 3;
+    if (attempt < MAX) {
+      updateItem(queueId, 'running', `Reconnecting… (${attempt + 1}/${MAX})`);
+      setTimeout(() => trackYtdlpJob(jobId, queueId, attempt + 1), 2000);
+    } else {
+      updateItem(queueId, 'error', 'Lost connection to progress stream', null, true);
+    }
   };
 }
 

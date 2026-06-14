@@ -206,16 +206,24 @@ app.get('/api/progress/:jobId', (req, res) => {
     return res.end();
   }
 
+  const heartbeat = setInterval(() => {
+    if (!res.writableEnded) res.write(': heartbeat\n\n');
+  }, 25000);
+
   const listener = (data) => {
     send(data);
     if (data.status === 'done' || data.status === 'error') {
+      clearInterval(heartbeat);
       jobEvents.off(jobId, listener);
       res.end();
     }
   };
   jobEvents.on(jobId, listener);
 
-  req.on('close', () => jobEvents.off(jobId, listener));
+  req.on('close', () => {
+    clearInterval(heartbeat);
+    jobEvents.off(jobId, listener);
+  });
 });
 // -----------------------------------------------------------------------------
 
