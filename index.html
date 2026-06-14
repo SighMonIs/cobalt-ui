@@ -459,9 +459,9 @@ function renderRules(rules) {
 
 function ruleRowHtml(domain, dir) {
   return `<div class="rule-row">
-    <input type="text" class="rule-domain" value="${domain || ''}" placeholder="x.com">
+    <input type="text" class="rule-domain" value="${domain || ''}" placeholder="youtube.com">
     <span style="color:var(--text-muted);flex-shrink:0">→</span>
-    <input type="text" class="rule-dir" value="${dir || ''}" placeholder="/media/downloads/twitter">
+    <input type="text" class="rule-dir" value="${dir || ''}" placeholder="/downloads/youtube">
     <button onclick="this.closest('.rule-row').remove()" class="hist-remove" title="Remove">×</button>
   </div>`;
 }
