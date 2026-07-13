@@ -71,7 +71,10 @@ function appendHistory(entry) {
   const history = loadHistory();
   history.unshift({ id: crypto.randomUUID(), date: new Date().toISOString(), ...entry });
   if (history.length > HISTORY_MAX) history.length = HISTORY_MAX;
-  try { fs.writeFileSync(HISTORY_PATH, JSON.stringify(history)); } catch (e) {
+  try {
+    fs.mkdirSync(path.dirname(HISTORY_PATH), { recursive: true });
+    fs.writeFileSync(HISTORY_PATH, JSON.stringify(history));
+  } catch (e) {
     console.error('Failed to write history:', e.message);
   }
 }
@@ -211,6 +214,25 @@ app.get('/api/status', async (req, res) => {
   }
 });
 
+function publicJob(job) {
+  const { proc, _req, _stream, _file, ...safe } = job;
+  return safe;
+}
+
+// All currently in-flight/recently-finished jobs — lets the UI pick up jobs
+// started elsewhere (e.g. the iOS Shortcut hitting /api/download directly).
+app.get('/api/jobs', (req, res) => {
+  res.json([...jobs.entries()].map(([jobId, job]) => ({ jobId, ...publicJob(job) })));
+});
+
+// Plain-JSON snapshot of one job, for polling from clients that can't use SSE
+// (e.g. iOS Shortcuts).
+app.get('/api/job/:jobId', (req, res) => {
+  const job = jobs.get(req.params.jobId);
+  if (!job) return res.status(404).json({ error: 'Job not found' });
+  res.json({ jobId: req.params.jobId, ...publicJob(job) });
+});
+
 app.get('/api/history', (req, res) => res.json(loadHistory()));
 
 app.delete('/api/history', (req, res) => {
@@ -311,12 +333,12 @@ app.get('/api/progress/:jobId', (req, res) => {
 
 app.post('/api/download', async (req, res) => {
   const { url, videoQuality = '1080', audioFormat = 'mp3', downloadMode = 'auto' } = req.body;
-  if (!url) return res.status(400).json({ error: 'URL is required' });
+  if (!url) return res.status(400).json({ ok: false, error: 'URL is required' });
 
   // Domain allowlist: skip cobalt entirely for known yt-dlp-only sites
   if (shouldUseYtdlp(url)) {
     const jobId = startYtdlpJob(url);
-    return res.json({ status: 'ytdlp', jobId });
+    return res.json({ ok: true, status: 'ytdlp', jobId, message: 'Queued (yt-dlp)' });
   }
 
   try {
@@ -328,24 +350,29 @@ app.post('/api/download', async (req, res) => {
       // Generic fallback: cobalt doesn't recognise this site at all
       if (cobaltRes.error?.code === 'error.api.link.invalid') {
         const jobId = startYtdlpJob(url);
-        return res.json({ status: 'ytdlp', jobId });
+        return res.json({ ok: true, status: 'ytdlp', jobId, message: 'Queued (yt-dlp)' });
       }
-      return res.status(400).json({ error: cobaltRes.error?.code || 'Cobalt error' });
+      const errMsg = cobaltRes.error?.code || 'Cobalt error';
+      appendHistory({ url, filename: null, status: 'error', error: errMsg, size: null });
+      return res.status(400).json({ ok: false, error: errMsg });
     }
     if (cobaltRes.status === 'picker') {
-      return res.json({ status: 'picker', picker: cobaltRes.picker, audio: cobaltRes.audio });
+      return res.json({ ok: true, status: 'picker', picker: cobaltRes.picker, audio: cobaltRes.audio, message: 'Multiple items found' });
     }
     if (cobaltRes.status === 'redirect' || cobaltRes.status === 'tunnel') {
       const ext = path.extname(cobaltRes.filename || '').replace('.', '') || 'mp4';
       const filename = twitterFilename(url, ext) || cobaltRes.filename || `download_${Date.now()}.mp4`;
       const filepath = path.join(getDownloadDir(url), sanitize(filename));
       const jobId = startCobaltJob(cobaltRes.url, filepath, url);
-      return res.json({ status: 'cobalt-job', jobId });
+      return res.json({ ok: true, status: 'cobalt-job', jobId, message: 'Queued' });
     } else {
-      res.status(400).json({ error: `Unexpected cobalt status: ${cobaltRes.status}` });
+      const errMsg = `Unexpected cobalt status: ${cobaltRes.status}`;
+      appendHistory({ url, filename: null, status: 'error', error: errMsg, size: null });
+      res.status(400).json({ ok: false, error: errMsg });
     }
   } catch (e) {
-    res.status(500).json({ error: e.message });
+    appendHistory({ url, filename: null, status: 'error', error: e.message, size: null });
+    res.status(500).json({ ok: false, error: e.message });
   }
 });
 

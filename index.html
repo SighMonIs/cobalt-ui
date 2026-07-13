@@ -335,8 +335,27 @@ async function queueDownload() {
   } catch(e) { updateItem(id,'error',e.message,null,true); }
 }
 
+// Jobs the UI already has a queue item for — including ones started
+// elsewhere (e.g. the iOS Shortcut) and picked up via pollJobs().
+let knownJobIds = new Set();
+
+// Pick up jobs that were started outside this tab (iOS Shortcut hitting
+// /api/download directly) so they show up in the queue here too.
+async function pollJobs() {
+  let active;
+  try { active = await (await fetch('/api/jobs')).json(); } catch { return; }
+  for (const job of active) {
+    if (knownJobIds.has(job.jobId) || document.getElementById('qi-' + job.jobId)) continue;
+    addQueueItem(job.url || '', job.jobId);
+    const el = document.getElementById('qi-' + job.jobId);
+    if (el) el.dataset.jobId = job.jobId;
+    trackJob(job.jobId, job.jobId);
+  }
+}
+
 // Track a server-side job (yt-dlp or cobalt) via Server-Sent Events
 function trackJob(jobId, queueId, attempt = 0) {
+  knownJobIds.add(jobId);
   if (attempt === 0) {
     updateItem(queueId, 'running', 'Starting…', null, false, null);
     const el = document.getElementById('qi-' + queueId);
@@ -483,8 +502,8 @@ async function saveSettings() {
 // ---------------------------------------------------------------------------
 
 document.getElementById('url-input').addEventListener('keydown', e => { if(e.key==='Enter') queueDownload(); });
-checkStatus(); loadHistory(); loadSettingsData();
-setInterval(checkStatus, 30000); setInterval(loadHistory, 10000);
+checkStatus(); loadHistory(); loadSettingsData(); pollJobs();
+setInterval(checkStatus, 30000); setInterval(loadHistory, 10000); setInterval(pollJobs, 4000);
 </script>
 </body>
 </html>
