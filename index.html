@@ -148,12 +148,15 @@
 <footer>
   <span>cobalt-ui <b>v0.0.2</b></span>
   <span>cobalt api <b id="cobalt-version">—</b></span>
-  <span id="cookie-expiry" style="display:none">X.com cookies expire <b id="cookie-expiry-date">—</b></span>
+  <button id="cookie-expiry" class="ghost" style="display:none" onclick="openSettings()"></button>
   <a href="https://cobalt.tools" target="_blank" style="font-size:0.75rem;color:var(--text-muted);text-decoration:none;">powered by cobalt</a>
 </footer>
 <div id="settings-modal" class="picker-modal hidden">
   <div class="picker-inner" style="max-width:580px">
-    <h3>Settings</h3>
+    <div style="display:flex;align-items:center;justify-content:space-between">
+      <h3>Settings</h3>
+      <button class="hist-remove" style="font-size:1.4rem" onclick="closeSettings()" title="Close">&times;</button>
+    </div>
     <div class="settings-section">
       <label class="settings-label">Default download folder</label>
       <input type="text" id="set-default-dir" placeholder="/media/downloads/cobalt" style="width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:0.5rem 0.75rem;border-radius:6px;font-size:0.85rem;outline:none;">
@@ -198,6 +201,8 @@
 <script>
 let pickerContext = null;
 
+let twitterExpiry = null; // { text, daysLeft } from /api/status, if tracked
+
 async function checkStatus() {
   try {
     const d = await (await fetch('/api/status')).json();
@@ -208,15 +213,30 @@ async function checkStatus() {
       const [dd, mm, yyyy] = d.cookieExpiry.split('/');
       const expiry = new Date(`${yyyy}-${mm}-${dd}`);
       const daysLeft = Math.ceil((expiry - Date.now()) / (1000 * 60 * 60 * 24));
-      const el = document.getElementById('cookie-expiry');
-      const dateEl = document.getElementById('cookie-expiry-date');
-      dateEl.textContent = `${dd}/${mm}/${yyyy} (${daysLeft} days)`;
-      el.style.display = 'inline';
-      if (daysLeft <= 7) { dateEl.style.color = 'var(--error)'; }
-      else if (daysLeft <= 30) { dateEl.style.color = 'var(--warning)'; }
-      else { dateEl.style.color = 'var(--success)'; }
+      twitterExpiry = { text: `${dd}/${mm}/${yyyy} (${daysLeft} days)`, daysLeft };
     }
   } catch { /* cobalt api offline */ }
+  updateCookieButton();
+}
+
+// Button in the footer: hover/focus shows a tooltip listing every service
+// currently in cookies.json, with expiry where we actually track it.
+async function updateCookieButton() {
+  const btn = document.getElementById('cookie-expiry');
+  let services = [];
+  try { services = Object.keys(JSON.parse(await (await fetch('/api/cookies')).text())); } catch {}
+  if (!services.length) { btn.style.display = 'none'; return; }
+
+  const lines = services.map(s => {
+    if (s === 'twitter' && twitterExpiry) return `twitter: expires ${twitterExpiry.text}`;
+    return `${s}: expiry not tracked`;
+  });
+  btn.title = lines.join('\n');
+  btn.textContent = services.length === 1 ? `${services[0]} cookie` : `${services.length} cookies`;
+  btn.style.display = 'inline-block';
+  if (twitterExpiry && twitterExpiry.daysLeft <= 7) { btn.style.borderColor = 'var(--error)'; btn.style.color = 'var(--error)'; }
+  else if (twitterExpiry && twitterExpiry.daysLeft <= 30) { btn.style.borderColor = 'var(--warning)'; btn.style.color = 'var(--warning)'; }
+  else { btn.style.borderColor = ''; btn.style.color = ''; }
 }
 
 async function loadHistory() {
@@ -501,7 +521,7 @@ async function saveCookies() {
       headers: { 'Content-Type': 'text/plain' },
       body: text,
     })).json();
-    if (data.ok) { status.textContent = 'Saved'; status.style.color = 'var(--success)'; }
+    if (data.ok) { status.textContent = 'Saved'; status.style.color = 'var(--success)'; updateCookieButton(); }
     else { status.textContent = data.error; status.style.color = 'var(--error)'; }
   } catch (e) {
     status.textContent = 'Failed to save: ' + e.message;
