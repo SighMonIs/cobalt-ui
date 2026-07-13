@@ -184,12 +184,15 @@ function startYtdlpJob(url) {
 }
 // -----------------------------------------------------------------------------
 
-// Write cookies.json on startup from env vars
+// Write the twitter entry into cookies.json on startup from env vars, merging
+// with whatever's already there (e.g. other services edited via the UI)
+// rather than clobbering the whole file.
 if (TWITTER_AUTH_TOKEN && TWITTER_CT0) {
   try {
-    const cookies = {
-      twitter: [`auth_token=${TWITTER_AUTH_TOKEN}; ct0=${TWITTER_CT0}`]
-    };
+    let cookies = {};
+    try { cookies = JSON.parse(fs.readFileSync(COOKIE_PATH, 'utf8')); } catch {}
+    cookies.twitter = [`auth_token=${TWITTER_AUTH_TOKEN}; ct0=${TWITTER_CT0}`];
+    fs.mkdirSync(path.dirname(COOKIE_PATH), { recursive: true });
     fs.writeFileSync(COOKIE_PATH, JSON.stringify(cookies, null, 2));
     console.log(`Cookies written to ${COOKIE_PATH}`);
   } catch (e) {
@@ -289,6 +292,26 @@ app.post('/api/settings', (req, res) => {
   const ok = saveSettings({ defaultDir, rules: rules || [] });
   res.json({ ok });
 });
+
+// --- Cookies (cookies.json) editor -------------------------------------------
+app.get('/api/cookies', (req, res) => {
+  try { res.type('application/json').send(fs.readFileSync(COOKIE_PATH, 'utf8')); }
+  catch { res.type('application/json').send('{}'); }
+});
+
+app.post('/api/cookies', express.text({ type: '*/*', limit: '256kb' }), (req, res) => {
+  let parsed;
+  try { parsed = JSON.parse(req.body); }
+  catch (e) { return res.status(400).json({ ok: false, error: 'Invalid JSON: ' + e.message }); }
+  try {
+    fs.mkdirSync(path.dirname(COOKIE_PATH), { recursive: true });
+    fs.writeFileSync(COOKIE_PATH, JSON.stringify(parsed, null, 2));
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+// ---------------------------------------------------------------------------
 
 // --- yt-dlp progress stream (SSE) --------------------------------------------
 app.get('/api/progress/:jobId', (req, res) => {

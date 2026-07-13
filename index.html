@@ -167,6 +167,14 @@
       <button class="secondary" onclick="closeSettings()">Cancel</button>
       <button onclick="saveSettings()">Save</button>
     </div>
+    <div class="settings-section" style="margin-top:1.5rem;padding-top:1.25rem;border-top:1px solid var(--border)">
+      <label class="settings-label">Cookies (cookies.json) — raw, per-service session cookies used by cobalt</label>
+      <textarea id="set-cookies" rows="8" spellcheck="false" placeholder='{"tiktok": ["sessionid_ss=..."]}' style="width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:0.5rem 0.75rem;border-radius:6px;font-size:0.78rem;font-family:ui-monospace,Menlo,Consolas,monospace;outline:none;resize:vertical;"></textarea>
+      <div id="cookies-status" style="font-size:0.78rem;margin-top:4px;min-height:1em"></div>
+      <div style="display:flex;justify-content:flex-end;margin-top:8px">
+        <button class="secondary" onclick="saveCookies()" style="font-size:0.8rem;padding:0.35rem 0.8rem">Save cookies</button>
+      </div>
+    </div>
   </div>
 </div>
 <div id="picker-modal" class="picker-modal hidden">
@@ -467,7 +475,38 @@ async function loadSettingsData() {
 function openSettings() {
   document.getElementById('set-default-dir').value = settingsData.defaultDir || '';
   renderRules(settingsData.rules || []);
+  loadCookies();
   document.getElementById('settings-modal').classList.remove('hidden');
+}
+
+async function loadCookies() {
+  const status = document.getElementById('cookies-status');
+  status.textContent = '';
+  try {
+    document.getElementById('set-cookies').value = await (await fetch('/api/cookies')).text();
+  } catch (e) {
+    status.textContent = 'Failed to load: ' + e.message;
+    status.style.color = 'var(--error)';
+  }
+}
+
+async function saveCookies() {
+  const status = document.getElementById('cookies-status');
+  const text = document.getElementById('set-cookies').value;
+  status.textContent = 'Saving…';
+  status.style.color = 'var(--text-muted)';
+  try {
+    const data = await (await fetch('/api/cookies', {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain' },
+      body: text,
+    })).json();
+    if (data.ok) { status.textContent = 'Saved'; status.style.color = 'var(--success)'; }
+    else { status.textContent = data.error; status.style.color = 'var(--error)'; }
+  } catch (e) {
+    status.textContent = 'Failed to save: ' + e.message;
+    status.style.color = 'var(--error)';
+  }
 }
 
 function closeSettings() { document.getElementById('settings-modal').classList.add('hidden'); }
@@ -504,6 +543,12 @@ async function saveSettings() {
 document.getElementById('url-input').addEventListener('keydown', e => { if(e.key==='Enter') queueDownload(); });
 checkStatus(); loadHistory(); loadSettingsData(); pollJobs();
 setInterval(checkStatus, 30000); setInterval(loadHistory, 10000); setInterval(pollJobs, 4000);
+
+// Timers get throttled/paused while the tab is backgrounded (e.g. switching
+// to the Shortcut) — catch up immediately when it's foregrounded again.
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden) { loadHistory(); pollJobs(); }
+});
 </script>
 </body>
 </html>
