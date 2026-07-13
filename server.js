@@ -25,6 +25,10 @@ const YTDLP_DOMAINS = (process.env.YTDLP_DOMAINS || 'thisvid.com')
   .map(d => d.trim().toLowerCase())
   .filter(Boolean);
 
+// Netscape-format cookies.txt for yt-dlp (separate from cobalt's cookies.json
+// — yt-dlp reads its own file via --cookies, cobalt never sees this one).
+const YTDLP_COOKIES_PATH = path.join(MEDIA_ROOT, '.ytdlp-cookies.txt');
+
 const jobs = new Map(); // jobId -> { status, percent, eta, speed, filename, error, url }
 const jobEvents = new EventEmitter();
 
@@ -105,7 +109,7 @@ function startYtdlpJob(url) {
   };
   jobs.set(jobId, job);
 
-  const proc = spawn('yt-dlp', [
+  const ytdlpArgs = [
     url,
     '-P', downloadDir,
     '-o', '%(title)s.%(ext)s',
@@ -113,7 +117,11 @@ function startYtdlpJob(url) {
     '--newline',
     '--progress-template', 'download:PROGRESS %(progress._percent_str)s|%(progress._eta_str)s|%(progress._speed_str)s',
     '--print', 'after_move:FILENAME %(filepath)s',
-  ]);
+  ];
+  if (fs.existsSync(YTDLP_COOKIES_PATH) && fs.statSync(YTDLP_COOKIES_PATH).size > 0) {
+    ytdlpArgs.push('--cookies', YTDLP_COOKIES_PATH);
+  }
+  const proc = spawn('yt-dlp', ytdlpArgs);
 
   job.proc = proc;
 
@@ -306,6 +314,23 @@ app.post('/api/cookies', express.text({ type: '*/*', limit: '256kb' }), (req, re
   try {
     fs.mkdirSync(path.dirname(COOKIE_PATH), { recursive: true });
     fs.writeFileSync(COOKIE_PATH, JSON.stringify(parsed, null, 2));
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+// ---------------------------------------------------------------------------
+
+// --- yt-dlp cookies.txt editor (Netscape format, used by YTDLP_DOMAINS) -----
+app.get('/api/ytdlp-cookies', (req, res) => {
+  try { res.type('text/plain').send(fs.readFileSync(YTDLP_COOKIES_PATH, 'utf8')); }
+  catch { res.type('text/plain').send(''); }
+});
+
+app.post('/api/ytdlp-cookies', express.text({ type: '*/*', limit: '256kb' }), (req, res) => {
+  try {
+    fs.mkdirSync(path.dirname(YTDLP_COOKIES_PATH), { recursive: true });
+    fs.writeFileSync(YTDLP_COOKIES_PATH, req.body);
     res.json({ ok: true });
   } catch (e) {
     res.status(500).json({ ok: false, error: e.message });

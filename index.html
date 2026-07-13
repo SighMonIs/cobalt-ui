@@ -178,6 +178,14 @@
         <button class="secondary" onclick="saveCookies()" style="font-size:0.8rem;padding:0.35rem 0.8rem">Save cookies</button>
       </div>
     </div>
+    <div class="settings-section" style="margin-top:1.5rem;padding-top:1.25rem;border-top:1px solid var(--border)">
+      <label class="settings-label">yt-dlp cookies.txt — Netscape format, used for sites that bypass cobalt (e.g. thisvid.com)</label>
+      <textarea id="set-ytdlp-cookies" rows="8" spellcheck="false" placeholder="# Netscape HTTP Cookie File" style="width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:0.5rem 0.75rem;border-radius:6px;font-size:0.78rem;font-family:ui-monospace,Menlo,Consolas,monospace;outline:none;resize:vertical;"></textarea>
+      <div id="ytdlp-cookies-status" style="font-size:0.78rem;margin-top:4px;min-height:1em"></div>
+      <div style="display:flex;justify-content:flex-end;margin-top:8px">
+        <button class="secondary" onclick="saveYtdlpCookies()" style="font-size:0.8rem;padding:0.35rem 0.8rem">Save yt-dlp cookies</button>
+      </div>
+    </div>
   </div>
 </div>
 <div id="picker-modal" class="picker-modal hidden">
@@ -496,7 +504,38 @@ function openSettings() {
   document.getElementById('set-default-dir').value = settingsData.defaultDir || '';
   renderRules(settingsData.rules || []);
   loadCookies();
+  loadYtdlpCookies();
   document.getElementById('settings-modal').classList.remove('hidden');
+}
+
+async function loadYtdlpCookies() {
+  const status = document.getElementById('ytdlp-cookies-status');
+  status.textContent = '';
+  try {
+    document.getElementById('set-ytdlp-cookies').value = await (await fetch('/api/ytdlp-cookies')).text();
+  } catch (e) {
+    status.textContent = 'Failed to load: ' + e.message;
+    status.style.color = 'var(--error)';
+  }
+}
+
+async function saveYtdlpCookies() {
+  const status = document.getElementById('ytdlp-cookies-status');
+  const text = document.getElementById('set-ytdlp-cookies').value;
+  status.textContent = 'Saving…';
+  status.style.color = 'var(--text-muted)';
+  try {
+    const data = await (await fetch('/api/ytdlp-cookies', {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain' },
+      body: text,
+    })).json();
+    if (data.ok) { status.textContent = 'Saved'; status.style.color = 'var(--success)'; }
+    else { status.textContent = data.error; status.style.color = 'var(--error)'; }
+  } catch (e) {
+    status.textContent = 'Failed to save: ' + e.message;
+    status.style.color = 'var(--error)';
+  }
 }
 
 async function loadCookies() {
